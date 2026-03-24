@@ -36,7 +36,7 @@ If you cite this project academically, please include the course code, term, pha
 Clone the repository and build from the project root:
 
 ```bash
-git clone https://github.com/<YOUR_USERNAME>/csc220-motorcycle-dashboard-phase1.git
+git clone https://github.com/YaroslavTrachIgor/csc220-motorcycle-dashboard-phase1.git
 cd csc220-motorcycle-dashboard-phase1
 make
 ```
@@ -111,7 +111,7 @@ Phase I intentionally omits synchronization primitives; shared state access is d
 | asheehyut | [@asheehyut](https://github.com/asheehyut) |
 | Y1LD1Z-US | [@Y1LD1Z-US](https://github.com/Y1LD1Z-US) |
 
-Collaborator invitations are issued on GitHub so these accounts can push to the repository.
+Collaborators have been invited on GitHub with **write** access; each person must accept the invitation (email or [GitHub notifications](https://github.com/notifications)) before the repo appears in their account.
 
 ## License
 
