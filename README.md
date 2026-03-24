@@ -146,6 +146,37 @@ Phase I intentionally omits synchronization primitives; shared state access is d
 | asheehyut | [@asheehyut](https://github.com/asheehyut) |
 | Y1LD1Z-US | [@Y1LD1Z-US](https://github.com/Y1LD1Z-US) |
 
-## License & academic notice
+---
 
-This work is submitted in connection with **The University of Tampa** and **CSC 220 — Operating Systems and Systems Programming**. It is **not** released under an open-source software license. Ownership, permitted use, and any redistribution are subject to **The University of Tampa** policies, including the **Honor Code** and **academic integrity** requirements, and to the terms set by the course instructor. Commercial use, publication as one’s own without attribution where required, or reuse beyond course scope is not authorized except as explicitly allowed by university and course policy.
+<p align="center">
+  <sub><strong>LICENSE &amp; ACADEMIC NOTICE</strong></sub>
+</p>
+
+<p align="center">
+  <sub>
+    <strong>The University of Tampa</strong><br>
+    <em>CSC 220 — Operating Systems and Systems Programming</em>
+  </sub>
+</p>
+
+<blockquote>
+  <p><sub>
+
+  <strong>Status.</strong> This repository is <strong>not</strong> distributed under an open-source or public software license. It is retained for educational use in connection with university coursework.
+
+  </sub></p>
+  <p><sub>
+
+  <strong>Ownership &amp; use.</strong> Rights in this work remain subject to <strong>The University of Tampa</strong> policies, including the <strong>Honor Code</strong> and <strong>academic integrity</strong> standards, and to conditions established by the course instructor. Permitted use is limited to the scope of the course unless expressly authorized otherwise.
+
+  </sub></p>
+  <p><sub>
+
+  <strong>Restrictions.</strong> Commercial exploitation, redistribution outside approved academic context, or misrepresentation of authorship (including failure to provide attribution where required) is not permitted except to the extent explicitly allowed by university and course policy.
+
+  </sub></p>
+</blockquote>
+
+<p align="center">
+  <sub><em>— End of notice —</em></sub>
+</p>
