@@ -3,12 +3,15 @@
  * Reads shared state and displays formatted output. No simulation logic.
  */
 
+#define _XOPEN_SOURCE 700
 #include "system_state.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <unistd.h>
 #include <time.h>
 #include <string.h>
+#include <wchar.h>
+#include <limits.h>
 
 #define CONTENT_WIDTH       58   /* Chars between left ║ and right ║ (match ═ count) */
 #define BAR_LENGTH          20
@@ -45,16 +48,65 @@ static void format_time(time_t start, time_t now, char *buf) {
 }
 
 
-/* Print a content line: pads to CONTENT_WIDTH so right border aligns */
+/* Terminal display width of UTF-8 string (not byte length) */
+static int utf8_display_width(const char *s) {
+    mbstate_t mbs;
+    memset(&mbs, 0, sizeof(mbs));
+    int total = 0;
+    const unsigned char *p = (const unsigned char *)s;
+
+    while (*p) {
+        wchar_t wc;
+        size_t n = mbrtowc(&wc, (const char *)p, MB_LEN_MAX, &mbs);
+        if (n == (size_t)-1 || n == (size_t)-2) {
+            total += 1;
+            p++;
+            memset(&mbs, 0, sizeof(mbs));
+            continue;
+        }
+        if (n == 0)
+            break;
+        int cw = wcwidth(wc);
+        if (cw < 0)
+            cw = 1;
+        total += cw;
+        p += n;
+    }
+    return total;
+}
+
+static void utf8_truncate_to_width(char *buf, int max_width) {
+    while ((int)utf8_display_width(buf) > max_width && buf[0] != '\0') {
+        size_t len = strlen(buf);
+        if (len == 0)
+            break;
+        len--;
+        while (len > 0 && (buf[len] & 0xC0) == 0x80)
+            len--;
+        buf[len] = '\0';
+    }
+}
+
+/* Pad to CONTENT_WIDTH terminal columns (UTF-8 safe; not byte count) */
 static void print_line(const char *fmt, ...) {
-    char buf[128];
+    char buf[512];
     va_list ap;
     va_start(ap, fmt);
-    int len = vsnprintf(buf, sizeof(buf), fmt, ap);
+    vsnprintf(buf, sizeof(buf) - 64, fmt, ap);
     va_end(ap);
-    for (int i = len; i < CONTENT_WIDTH; i++) buf[i] = ' ';
-    buf[CONTENT_WIDTH] = '\0';
-    printf("║%.*s║\n", CONTENT_WIDTH, buf);
+
+    utf8_truncate_to_width(buf, CONTENT_WIDTH);
+    int w = utf8_display_width(buf);
+    int pad = CONTENT_WIDTH - w;
+    if (pad < 0)
+        pad = 0;
+
+    size_t len = strlen(buf);
+    for (int i = 0; i < pad && len + 1 < sizeof(buf); i++)
+        buf[len++] = ' ';
+    buf[len] = '\0';
+
+    printf("║%s║\n", buf);
 }
 
 static void print_dashboard(void) {

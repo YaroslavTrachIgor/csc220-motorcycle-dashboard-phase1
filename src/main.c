@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
+#include <locale.h>
 #include "system_state.h"
 #include "subsystems.h"
 
@@ -21,6 +22,8 @@ static void signal_handler(int sig) {
 
 int main(void) {
     pthread_t engine_tid, motion_tid, fuel_tid, ecu_tid, dashboard_tid;
+
+    setlocale(LC_CTYPE, "");
 
     srand((unsigned)time(NULL));
     system_state_init();
