@@ -1,0 +1,10 @@
+# Build
+build/
+bazooki_os
+*.o
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+*~
