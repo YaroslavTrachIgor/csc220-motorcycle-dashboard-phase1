@@ -19,7 +19,7 @@ University of Tampa, CSC 220, Spring 2026, Phase I assignment *Motorcycle Dashbo
 
 ## Installation
 
-Obtain the source (clone or archive) and `cd` to the project root. Two build paths are supported, analogous to multiple package managers in other ecosystems (e.g. CocoaPods vs. Swift Package Manager in Swift).
+Obtain the source (clone or archive) and `cd` to the project root.
 
 ### 1) Makefile — `build/` and `bazooki_os`
 
