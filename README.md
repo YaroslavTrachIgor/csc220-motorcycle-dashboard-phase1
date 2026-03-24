@@ -9,20 +9,7 @@ This repository implements **Phase I** of a simulated motorcycle “operating sy
 
 ## Course & citation
 
-- **Institution:** The University of Tampa  
-- **Course:** CSC 220 — *Operating Systems and Systems Programming*  
-- **Term:** Spring ’26  
-- **Phase:** Phase I — *Threads & architecture*  
-- **Assignment document:** *OS Project _ Motorcycle _ Phase I.pdf* (course LMS / Canvas)
-
-**Citation (bibliography):** University of Tampa, CSC 220, Spring 2026, Phase I assignment *Motorcycle Dashboard*; specification PDF *OS Project _ Motorcycle _ Phase I.pdf*.
-
-## Features
-
-- Five `pthread` subsystems: Engine, Motion, Fuel, ECU, Dashboard  
-- Shared global state (`g_state`) with documented responsibilities per layer  
-- Terminal UI with fixed-width borders, gauges, and status indicators  
-- No GUI; ANSI clear/refresh for in-place updates  
+University of Tampa, CSC 220, Spring 2026, Phase I assignment *Motorcycle Dashboard*; specification PDF *OS Project _ Motorcycle _ Phase I.pdf*.
 
 ## Prerequisites
 
@@ -33,8 +20,6 @@ This repository implements **Phase I** of a simulated motorcycle “operating sy
 ## Installation
 
 Obtain the source (clone or archive) and `cd` to the project root. Two build paths are supported, analogous to multiple package managers in other ecosystems (e.g. CocoaPods vs. Swift Package Manager in Swift).
-
----
 
 ### 1) Makefile — `build/` and `bazooki_os`
 
@@ -54,8 +39,6 @@ make
 ```bash
 make clean   # removes build/ and bazooki_os
 ```
-
----
 
 ### 2) GCC commands (no Make)
 
@@ -79,8 +62,6 @@ Single-shot alternative (same flags, all sources at once):
 ```bash
 gcc -Wall -Wextra -std=c99 -I include -pthread src/*.c -o bazooki_os -lm
 ```
-
----
 
 ### Notes: GCC on Ubuntu inside Docker
 
