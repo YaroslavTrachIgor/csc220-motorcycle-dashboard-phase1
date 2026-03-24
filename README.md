@@ -9,14 +9,13 @@ This repository implements **Phase I** of a simulated motorcycle “operating sy
 
 ## Course & citation
 
-This work is submitted for:
-
+- **Institution:** The University of Tampa  
 - **Course:** CSC 220 — *Operating Systems and Systems Programming*  
 - **Term:** Spring ’26  
 - **Phase:** Phase I — *Threads & architecture*  
-- **Assignment reference:** *Motorcycle Dashboard* — course document **OS Project _ Motorcycle _ Phase I.pdf** (distributed via course LMS / Canvas).
+- **Assignment document:** *OS Project _ Motorcycle _ Phase I.pdf* (course LMS / Canvas)
 
-If you cite this project academically, please include the course code, term, phase title, and the PDF filename above.
+**Citation (bibliography):** University of Tampa, CSC 220, Spring 2026, Phase I assignment *Motorcycle Dashboard*; specification PDF *OS Project _ Motorcycle _ Phase I.pdf*.
 
 ## Features
 
@@ -33,7 +32,13 @@ If you cite this project academically, please include the course code, term, pha
 
 ## Installation
 
-Clone the repository and build from the project root:
+Obtain the source (clone or archive) and `cd` to the project root. Two build paths are supported, analogous to multiple package managers in other ecosystems (e.g. CocoaPods vs. Swift Package Manager in Swift).
+
+---
+
+### 1) Makefile — `build/` and `bazooki_os`
+
+The default build uses **Make**. Object files go under **`build/`**; the executable **`bazooki_os`** is written to the **project root**.
 
 ```bash
 git clone https://github.com/YaroslavTrachIgor/csc220-motorcycle-dashboard-phase1.git
@@ -41,15 +46,64 @@ cd csc220-motorcycle-dashboard-phase1
 make
 ```
 
-The binary `bazooki_os` is produced in the project root.
-
-### Build artifacts
-
-Object files are written to `build/`. To clean:
+| Output | Location |
+|--------|----------|
+| Object files (`.o`) | `build/` |
+| Executable | `./bazooki_os` |
 
 ```bash
-make clean
+make clean   # removes build/ and bazooki_os
 ```
+
+---
+
+### 2) GCC commands (no Make)
+
+Equivalent to the Makefile: compile each translation unit, then link with `-pthread` and `-lm`.
+
+```bash
+mkdir -p build
+gcc -Wall -Wextra -std=c99 -I include -pthread -c src/main.c         -o build/main.o
+gcc -Wall -Wextra -std=c99 -I include -pthread -c src/system_state.c   -o build/system_state.o
+gcc -Wall -Wextra -std=c99 -I include -pthread -c src/engine.c         -o build/engine.o
+gcc -Wall -Wextra -std=c99 -I include -pthread -c src/motion.c         -o build/motion.o
+gcc -Wall -Wextra -std=c99 -I include -pthread -c src/fuel.c           -o build/fuel.o
+gcc -Wall -Wextra -std=c99 -I include -pthread -c src/ecu.c            -o build/ecu.o
+gcc -Wall -Wextra -std=c99 -I include -pthread -c src/dashboard.c      -o build/dashboard.o
+gcc build/main.o build/system_state.o build/engine.o build/motion.o \
+    build/fuel.o build/ecu.o build/dashboard.o -o bazooki_os -pthread -lm
+```
+
+Single-shot alternative (same flags, all sources at once):
+
+```bash
+gcc -Wall -Wextra -std=c99 -I include -pthread src/*.c -o bazooki_os -lm
+```
+
+---
+
+### Notes: GCC on Ubuntu inside Docker
+
+These steps match a typical classroom setup: **Ubuntu** image, **GCC** from the distribution, project built at a shell inside the container.
+
+1. Run an interactive Ubuntu container (example):
+
+   ```bash
+   docker run -it --rm ubuntu:22.04 bash
+   ```
+
+2. Install the toolchain (provides `gcc`, `make`, and common build headers):
+
+   ```bash
+   apt-get update
+   apt-get install -y build-essential git
+   ```
+
+3. Copy or clone the project into the container, `cd` to the project root, then build using **Makefile — `build/` and `bazooki_os`** or **GCC commands (no Make)** above.
+
+4. **Linking:** The final link step must include **`-pthread`** (POSIX threads) and **`-lm`** (math). On Ubuntu, `-pthread` is required for both compile and link when using `pthread` APIs.
+
+5. **Terminal:** Use an interactive TTY (`-it`) so the dashboard redraws correctly. Box-drawing characters assume a UTF-8 locale; if borders render incorrectly, set e.g. `export LANG=C.UTF-8` before running `./bazooki_os`.
 
 ## Usage
 
@@ -57,7 +111,7 @@ make clean
 ./bazooki_os
 ```
 
-Press **Ctrl+C** to stop the process. Phase I does not implement graceful thread shutdown.
+**Ctrl+C** terminates the process. Phase I does not implement graceful thread shutdown.
 
 ## Architecture
 
@@ -111,8 +165,6 @@ Phase I intentionally omits synchronization primitives; shared state access is d
 | asheehyut | [@asheehyut](https://github.com/asheehyut) |
 | Y1LD1Z-US | [@Y1LD1Z-US](https://github.com/Y1LD1Z-US) |
 
-Collaborators have been invited on GitHub with **write** access; each person must accept the invitation (email or [GitHub notifications](https://github.com/notifications)) before the repo appears in their account.
+## License & academic notice
 
-## License
-
-Course assignment code unless otherwise specified by your instructor. Use and redistribution should follow your institution’s academic integrity policy.
+This work is submitted in connection with **The University of Tampa** and **CSC 220 — Operating Systems and Systems Programming**. It is **not** released under an open-source software license. Ownership, permitted use, and any redistribution are subject to **The University of Tampa** policies, including the **Honor Code** and **academic integrity** requirements, and to the terms set by the course instructor. Commercial use, publication as one’s own without attribution where required, or reuse beyond course scope is not authorized except as explicitly allowed by university and course policy.
