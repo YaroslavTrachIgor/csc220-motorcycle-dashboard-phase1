@@ -17,6 +17,7 @@
 #define _XOPEN_SOURCE 700
 
 #include "system_state.h"
+#include "log.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <unistd.h>
@@ -35,7 +36,7 @@
 #define MILES_TO_KM         1.60934
 
 /* Dashboard refresh delay in microseconds (50000 = 50 ms) */
-#define REFRESH_INTERVAL_MS 50000
+#define REFRESH_INTERVAL_US 50000
 
 
 /* Converts the RPM zone enum into a readable text label */
@@ -62,6 +63,18 @@ static const char *temp_class_str(temp_classification_t t) {
 }
 
 
+/* Converts signal enum into readable text for logs */
+static const char *signal_state_str(signal_state_t s) {
+    switch (s) {
+        case SIGNAL_OFF:    return "OFF";
+        case SIGNAL_LEFT:   return "LEFT";
+        case SIGNAL_RIGHT:  return "RIGHT";
+        case SIGNAL_HAZARD: return "HAZARD";
+        default:            return "---";
+    }
+}
+
+
 /* Formats elapsed time into HH:MM:SS */
 static void format_time(time_t start, time_t now, char *buf) {
     long elapsed = (long)(now - start);
@@ -79,7 +92,7 @@ static void format_time(time_t start, time_t now, char *buf) {
 }
 
 
-/* 
+/*
  * Finds the terminal display width of a UTF-8 string.
  * This is used instead of strlen() so special symbols line up correctly.
  */
@@ -139,7 +152,7 @@ static void utf8_truncate_to_width(char *buf, int max_width) {
 }
 
 
-/* 
+/*
  * Prints one padded line inside the dashboard border.
  * This keeps all lines aligned neatly in the terminal.
  */
@@ -169,7 +182,90 @@ static void print_line(const char *fmt, ...) {
 }
 
 
-/* 
+/*
+ * Logs only important state transitions so the log does not spam every refresh.
+ */
+static void log_dashboard_state_changes(void) {
+    static int initialized = 0;
+
+    static int prev_engine_on;
+    static rpm_zone_t prev_rpm_zone;
+    static temp_classification_t prev_temp_classification;
+    static signal_state_t prev_signal_state;
+    static int prev_headlight_on;
+    static int prev_low_fuel;
+
+    int current_low_fuel = (g_state.fuel_gallons < FUEL_LOW_THRESHOLD);
+
+    if (!initialized) {
+        prev_engine_on = g_state.engine_on;
+        prev_rpm_zone = g_state.rpm_zone;
+        prev_temp_classification = g_state.temp_classification;
+        prev_signal_state = g_state.signal_state;
+        prev_headlight_on = g_state.headlight_on;
+        prev_low_fuel = current_low_fuel;
+        initialized = 1;
+
+        LOG_INFO("DASH", "Initial dashboard state captured");
+        return;
+    }
+
+    if (g_state.engine_on != prev_engine_on) {
+        LOG_INFO("ENGINE", "Engine turned %s",
+            g_state.engine_on ? "ON" : "OFF");
+        prev_engine_on = g_state.engine_on;
+    }
+
+    if (g_state.rpm_zone != prev_rpm_zone) {
+        LOG_INFO("RPM", "RPM zone changed: %s -> %s (RPM=%d)",
+            rpm_zone_str(prev_rpm_zone),
+            rpm_zone_str(g_state.rpm_zone),
+            g_state.rpm);
+        prev_rpm_zone = g_state.rpm_zone;
+    }
+
+    if (g_state.temp_classification != prev_temp_classification) {
+        if (g_state.temp_classification == TEMP_OVERHEAT) {
+            LOG_WARN("TEMP", "Temperature classification changed: %s -> %s (%.1f C)",
+                temp_class_str(prev_temp_classification),
+                temp_class_str(g_state.temp_classification),
+                g_state.engine_temp_celsius);
+        } else {
+            LOG_INFO("TEMP", "Temperature classification changed: %s -> %s (%.1f C)",
+                temp_class_str(prev_temp_classification),
+                temp_class_str(g_state.temp_classification),
+                g_state.engine_temp_celsius);
+        }
+        prev_temp_classification = g_state.temp_classification;
+    }
+
+    if (g_state.signal_state != prev_signal_state) {
+        LOG_INFO("SIGNAL", "Signal changed: %s -> %s",
+            signal_state_str(prev_signal_state),
+            signal_state_str(g_state.signal_state));
+        prev_signal_state = g_state.signal_state;
+    }
+
+    if (g_state.headlight_on != prev_headlight_on) {
+        LOG_INFO("LIGHT", "Headlight turned %s",
+            g_state.headlight_on ? "ON" : "OFF");
+        prev_headlight_on = g_state.headlight_on;
+    }
+
+    if (current_low_fuel != prev_low_fuel) {
+        if (current_low_fuel) {
+            LOG_WARN("FUEL", "Low fuel warning entered: %.2f gallons remaining",
+                g_state.fuel_gallons);
+        } else {
+            LOG_INFO("FUEL", "Low fuel warning cleared: %.2f gallons remaining",
+                g_state.fuel_gallons);
+        }
+        prev_low_fuel = current_low_fuel;
+    }
+}
+
+
+/*
  * Builds and prints the full dashboard.
  * It reads values from the shared global state and displays them.
  * No simulation logic happens here.
@@ -205,6 +301,10 @@ static void print_dashboard(void) {
     {
         char bar_buf[32];
         int filled = (int)((float)g_state.rpm / RPM_MAX * BAR_LENGTH);
+
+        if (filled < 0) {
+            filled = 0;
+        }
         if (filled > BAR_LENGTH) {
             filled = BAR_LENGTH;
         }
@@ -231,6 +331,10 @@ static void print_dashboard(void) {
     {
         char bar_buf[32];
         int filled = (int)((float)g_state.speed / SPEED_MAX * BAR_LENGTH);
+
+        if (filled < 0) {
+            filled = 0;
+        }
         if (filled > BAR_LENGTH) {
             filled = BAR_LENGTH;
         }
@@ -252,6 +356,10 @@ static void print_dashboard(void) {
         float fuel_pct = (g_state.fuel_gallons / FUEL_MAX_GALLONS) * 100.0f;
         char bar_buf[32];
         int filled = (int)(g_state.fuel_gallons / FUEL_MAX_GALLONS * BAR_LENGTH);
+
+        if (filled < 0) {
+            filled = 0;
+        }
         if (filled > BAR_LENGTH) {
             filled = BAR_LENGTH;
         }
@@ -303,7 +411,7 @@ static void print_dashboard(void) {
 }
 
 
-/* 
+/*
  * Clears the terminal, prints the dashboard again,
  * and flushes output so the update appears immediately.
  */
@@ -314,7 +422,7 @@ void refresh_dashboard(void (*print_fn)(void)) {
 }
 
 
-/* 
+/*
  * Dashboard thread:
  * This thread runs continuously during the program.
  * Its only job is to refresh the terminal dashboard at a fixed interval
@@ -323,9 +431,12 @@ void refresh_dashboard(void (*print_fn)(void)) {
 void *dashboard_thread(void *arg) {
     (void)arg;
 
+    LOG_INFO("DASH", "Dashboard thread started");
+
     while (1) {
+        log_dashboard_state_changes();
         refresh_dashboard(print_dashboard);
-        usleep(REFRESH_INTERVAL_MS);
+        usleep(REFRESH_INTERVAL_US);
     }
 
     return NULL;
