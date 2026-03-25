@@ -18,7 +18,7 @@ The official **grading rubric** lives on Canvas. This document translates the **
 | **Comments** | Brief block comments above each subsystem’s `*_thread` and any non-obvious logic (RPM/temp coupling, fuel formula, UTF-8 width padding, signal demo loop). Use `/* ... */` or consistent `//` style per course style guide. |
 | **Readable identifiers** | Spot-check that names match responsibilities (already mostly good); fix any unclear locals. |
 
-### Aiden — logging (primary)
+### Aidan — logging (primary)
 
 | Area | What “done” looks like |
 |------|-------------------------|
