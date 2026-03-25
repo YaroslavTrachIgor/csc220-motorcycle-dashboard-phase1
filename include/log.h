@@ -22,6 +22,9 @@ int  log_is_enabled(void);
 /* Main logging function */
 void log_message(log_level_t level, const char *category, const char *fmt, ...);
 
+/* Latest user-visible log summary (for dashboard); empty until first log line */
+const char *log_last_line(void);
+
 /* Convenience macros */
 #ifdef ENABLE_LOG
     #define LOG_INFO(cat, fmt, ...)  log_message(LOG_LEVEL_INFO,  cat, fmt, ##__VA_ARGS__)

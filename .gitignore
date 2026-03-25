@@ -3,6 +3,9 @@ build/
 bazooki_os
 *.o
 
+# Runtime log (default path when ENABLE_LOG)
+bazooki_os.log
+
 # Editor / OS
 .DS_Store
 *.swp

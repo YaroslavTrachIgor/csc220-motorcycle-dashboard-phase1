@@ -9,6 +9,13 @@
 static FILE *g_log_fp = NULL;
 static int g_log_enabled = 1;
 
+/* Snapshot of last message text for on-screen dashboard (subsystem + message) */
+static char g_last_line[96];
+
+const char *log_last_line(void) {
+    return g_last_line[0] != '\0' ? g_last_line : "(no events yet)";
+}
+
 static const char *level_str(log_level_t level) {
     switch (level) {
         case LOG_LEVEL_INFO:  return "INFO";
@@ -69,13 +76,16 @@ void log_message(log_level_t level, const char *category, const char *fmt, ...) 
     char ts[32];
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tm_now);
 
-    fprintf(g_log_fp, "[%s] %-5s %-8s ", ts, level_str(level), category ? category : "GENERAL");
-
+    char payload[160];
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(g_log_fp, fmt, ap);
+    vsnprintf(payload, sizeof(payload), fmt, ap);
     va_end(ap);
 
-    fputc('\n', g_log_fp);
+    (void)snprintf(g_last_line, sizeof(g_last_line), "%s: %s",
+        category ? category : "GENERAL", payload);
+
+    fprintf(g_log_fp, "[%s] %-5s %-8s %s\n",
+        ts, level_str(level), category ? category : "GENERAL", payload);
     fflush(g_log_fp);
 }

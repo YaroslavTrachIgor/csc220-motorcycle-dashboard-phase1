@@ -94,6 +94,20 @@ These steps match a typical classroom setup: **Ubuntu** image, **GCC** from the 
 
 **Ctrl+C** terminates the process. Phase I does not implement graceful thread shutdown.
 
+### Logging
+
+Builds use **`-DENABLE_LOG`** (see `Makefile`). By default, messages are appended to **`bazooki_os.log`** in the current directory (listed on stderr at startup). Follow the full stream in another terminal:
+
+```bash
+tail -f bazooki_os.log
+```
+
+- **`BAZOOKI_LOG_FILE=-`** — log to stderr instead of a file (lines can disappear when the dashboard clears the screen).
+- **`BAZOOKI_LOG_FILE=path`** — append to a custom file.
+- **`BAZOOKI_LOG=0`** — disable logging at runtime (see `log_init` in `log.c`).
+
+The dashboard shows a **LOG** row with the **most recent** event; state-change lines appear when RPM zone, temperature class, signals, headlight, fuel warning, or engine state change.
+
 ## Architecture
 
 The design follows three layers:

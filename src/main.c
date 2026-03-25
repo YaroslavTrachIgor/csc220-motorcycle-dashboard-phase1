@@ -20,8 +20,10 @@
 #include <signal.h>
 #include <time.h>
 #include <locale.h>
+#include <string.h>
 #include "system_state.h"
 #include "subsystems.h"
+#include "log.h"
 
 /* Global flag used to keep the program running */
 static volatile int g_running = 1;
@@ -49,6 +51,26 @@ int main(void) {
 
     /* Initialize the shared system state before threads start running */
     system_state_init();
+
+#ifdef ENABLE_LOG
+    /*
+     * Logging goes to a file by default so lines are not erased by the
+     * dashboard full-screen refresh. Use BAZOOKI_LOG_FILE=- for stderr.
+     */
+    {
+        const char *path = getenv("BAZOOKI_LOG_FILE");
+        if (path && strcmp(path, "-") == 0) {
+            log_init(NULL);
+        } else if (path && path[0] != '\0') {
+            log_init(path);
+            fprintf(stderr, "BAZOOKI OS: logging to %s (try: tail -f %s)\n", path, path);
+        } else {
+            log_init("bazooki_os.log");
+            fprintf(stderr,
+                "BAZOOKI OS: logging to bazooki_os.log (another terminal: tail -f bazooki_os.log)\n");
+        }
+    }
+#endif
 
     /* Register Ctrl+C handler so the program can stop when interrupted */
     signal(SIGINT, signal_handler);

@@ -2,7 +2,7 @@
 # Requires: pthread, C99
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -I include -pthread
+CFLAGS = -Wall -Wextra -std=c99 -I include -pthread -DENABLE_LOG
 LDFLAGS = -pthread -lm
 
 SRC_DIR = src

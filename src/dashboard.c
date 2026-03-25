@@ -63,18 +63,6 @@ static const char *temp_class_str(temp_classification_t t) {
 }
 
 
-/* Converts signal enum into readable text for logs */
-static const char *signal_state_str(signal_state_t s) {
-    switch (s) {
-        case SIGNAL_OFF:    return "OFF";
-        case SIGNAL_LEFT:   return "LEFT";
-        case SIGNAL_RIGHT:  return "RIGHT";
-        case SIGNAL_HAZARD: return "HAZARD";
-        default:            return "---";
-    }
-}
-
-
 /* Formats elapsed time into HH:MM:SS */
 static void format_time(time_t start, time_t now, char *buf) {
     long elapsed = (long)(now - start);
@@ -184,8 +172,23 @@ static void print_line(const char *fmt, ...) {
 
 /*
  * Logs only important state transitions so the log does not spam every refresh.
+ * Compiled only when ENABLE_LOG is set; otherwise LOG_* macros drop arguments
+ * and helpers used only here would trigger -Wunused-function.
  */
+#ifdef ENABLE_LOG
+static const char *signal_state_str(signal_state_t s) {
+    switch (s) {
+        case SIGNAL_OFF:    return "OFF";
+        case SIGNAL_LEFT:   return "LEFT";
+        case SIGNAL_RIGHT:  return "RIGHT";
+        case SIGNAL_HAZARD: return "HAZARD";
+        default:            return "---";
+    }
+}
+#endif
+
 static void log_dashboard_state_changes(void) {
+#ifdef ENABLE_LOG
     static int initialized = 0;
 
     static int prev_engine_on;
@@ -262,6 +265,7 @@ static void log_dashboard_state_changes(void) {
         }
         prev_low_fuel = current_low_fuel;
     }
+#endif
 }
 
 
@@ -405,6 +409,9 @@ static void print_dashboard(void) {
     if (g_state.fuel_gallons < FUEL_LOW_THRESHOLD) {
         print_line("⚠ LOW FUEL");
     }
+
+    /* Latest log event (file tail shows full history; screen refresh clears stderr) */
+    print_line("LOG %s", log_last_line());
 
     printf("╚══════════════════════════════════════════════════════════╝\n");
     printf("\033[0m");
