@@ -23,8 +23,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <string.h>
-#include <wchar.h>
-#include <limits.h>
+#include <stdint.h>
 
 /* Width of the dashboard content area inside the border */
 #define CONTENT_WIDTH       58
@@ -81,38 +80,133 @@ static void format_time(time_t start, time_t now, char *buf) {
 
 
 /*
- * Finds the terminal display width of a UTF-8 string.
- * This is used instead of strlen() so special symbols line up correctly.
+ * Decodes one UTF-8 code point from *pp, advances *pp past it.
+ * Returns the scalar value, or -1 at NUL. On invalid/truncated data,
+ * consumes one byte and returns that byte (treated as width 1).
+ *
+ * Locale-independent: Docker/minimal images often use LC_CTYPE=C, where
+ * mbrtowc does not decode UTF-8, which made strlen-style byte counting
+ * break the padded box border.
+ */
+static int utf8_next_codepoint(const unsigned char **pp) {
+    const unsigned char *p = *pp;
+    unsigned char c = p[0];
+
+    if (c == '\0') {
+        return -1;
+    }
+
+    /* ASCII */
+    if (c < 0x80u) {
+        *pp = p + 1;
+        return (int)c;
+    }
+
+    /* 2-byte */
+    if ((c & 0xE0u) == 0xC0u && p[1] != '\0') {
+        unsigned char c1 = p[1];
+        if ((c1 & 0xC0u) != 0x80u) {
+            *pp = p + 1;
+            return (int)c;
+        }
+        uint32_t cp = ((uint32_t)(c & 0x1Fu) << 6) | (uint32_t)(c1 & 0x3Fu);
+        if (cp < 0x80u) {
+            *pp = p + 1;
+            return (int)c;
+        }
+        *pp = p + 2;
+        return (int)cp;
+    }
+
+    /* 3-byte */
+    if ((c & 0xF0u) == 0xE0u && p[1] != '\0' && p[2] != '\0') {
+        unsigned char c1 = p[1];
+        unsigned char c2 = p[2];
+        if ((c1 & 0xC0u) != 0x80u || (c2 & 0xC0u) != 0x80u) {
+            *pp = p + 1;
+            return (int)c;
+        }
+        uint32_t cp = ((uint32_t)(c & 0x0Fu) << 12)
+            | ((uint32_t)(c1 & 0x3Fu) << 6)
+            | (uint32_t)(c2 & 0x3Fu);
+        if (cp < 0x800u || (cp >= 0xD800u && cp <= 0xDFFFu)) {
+            *pp = p + 1;
+            return (int)c;
+        }
+        *pp = p + 3;
+        return (int)cp;
+    }
+
+    /* 4-byte */
+    if ((c & 0xF8u) == 0xF0u && p[1] != '\0' && p[2] != '\0' && p[3] != '\0') {
+        unsigned char c1 = p[1];
+        unsigned char c2 = p[2];
+        unsigned char c3 = p[3];
+        if ((c1 & 0xC0u) != 0x80u || (c2 & 0xC0u) != 0x80u || (c3 & 0xC0u) != 0x80u) {
+            *pp = p + 1;
+            return (int)c;
+        }
+        uint32_t cp = ((uint32_t)(c & 0x07u) << 18)
+            | ((uint32_t)(c1 & 0x3Fu) << 12)
+            | ((uint32_t)(c2 & 0x3Fu) << 6)
+            | (uint32_t)(c3 & 0x3Fu);
+        if (cp < 0x10000u || cp > 0x10FFFFu) {
+            *pp = p + 1;
+            return (int)c;
+        }
+        *pp = p + 4;
+        return (int)cp;
+    }
+
+    *pp = p + 1;
+    return (int)c;
+}
+
+
+/*
+ * Locale-independent terminal column width for a Unicode code point.
+ * Returns 0 for control chars, 2 for East Asian Wide/Fullwidth, 1 otherwise.
+ * Replaces wcwidth() which breaks under LC_CTYPE=C in minimal Docker images.
+ */
+static int codepoint_width(uint32_t cp) {
+    if (cp < 0x20 || (cp >= 0x7F && cp < 0xA0))
+        return 0;
+
+    if ((cp >= 0x1100 && cp <= 0x115F) ||
+        cp == 0x2329 || cp == 0x232A ||
+        (cp >= 0x2E80 && cp <= 0x303E) ||
+        (cp >= 0x3040 && cp <= 0x33BF) ||
+        (cp >= 0x3400 && cp <= 0x4DBF) ||
+        (cp >= 0x4E00 && cp <= 0xA4CF) ||
+        (cp >= 0xA960 && cp <= 0xA97C) ||
+        (cp >= 0xAC00 && cp <= 0xD7A3) ||
+        (cp >= 0xF900 && cp <= 0xFAFF) ||
+        (cp >= 0xFE10 && cp <= 0xFE19) ||
+        (cp >= 0xFE30 && cp <= 0xFE6F) ||
+        (cp >= 0xFF01 && cp <= 0xFF60) ||
+        (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+        (cp >= 0x1F300 && cp <= 0x1F9FF) ||
+        (cp >= 0x20000 && cp <= 0x2FFFD) ||
+        (cp >= 0x30000 && cp <= 0x3FFFD))
+        return 2;
+
+    return 1;
+}
+
+
+/*
+ * Terminal display width of a UTF-8 string — fully locale-independent.
  */
 static int utf8_display_width(const char *s) {
-    mbstate_t mbs;
-    memset(&mbs, 0, sizeof(mbs));
     int total = 0;
     const unsigned char *p = (const unsigned char *)s;
 
-    while (*p) {
-        wchar_t wc;
-        size_t n = mbrtowc(&wc, (const char *)p, MB_LEN_MAX, &mbs);
-
-        /* Handle invalid UTF-8 safely */
-        if (n == (size_t)-1 || n == (size_t)-2) {
-            total += 1;
-            p++;
-            memset(&mbs, 0, sizeof(mbs));
-            continue;
-        }
-
-        if (n == 0) {
+    for (;;) {
+        int cp = utf8_next_codepoint(&p);
+        if (cp < 0) {
             break;
         }
-
-        int cw = wcwidth(wc);
-        if (cw < 0) {
-            cw = 1;
-        }
-
-        total += cw;
-        p += n;
+        total += codepoint_width((uint32_t)cp);
     }
 
     return total;
