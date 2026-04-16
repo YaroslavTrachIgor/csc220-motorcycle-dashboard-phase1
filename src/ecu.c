@@ -197,8 +197,8 @@ void *ecu_thread(void *arg) {
         if (engine_on && speed == 0) {
             pthread_mutex_lock(&mtx_engine);
             // CRITICAL SECTION begin -- ECU keeps RPM in idle range while vehicle is stopped
-            if (g_state.rpm < RPM_MIN) {
-                g_state.rpm = RPM_MIN;
+            if (g_state.rpm < RPM_IDLE_MIN) {
+                g_state.rpm = RPM_IDLE_MIN;
             }
             if (g_state.rpm > RPM_IDLE_MAX) {
                 g_state.rpm = RPM_IDLE_MAX;
