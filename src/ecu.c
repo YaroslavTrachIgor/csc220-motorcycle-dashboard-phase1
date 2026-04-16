@@ -2,45 +2,64 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 1
+ * Project: Motorcycle Dashboard - Phase 2
  * File: ecu.c
- * Date: 03/24/2026
  *
  * Description:
- * This file implements the ECU subsystem (Electronic Control Unit) for
- * the motorcycle simulation. Its job is to monitor the shared system state
- * and update derived values such as RPM zone, engine temperature category,
- * and signal state. This file does not handle display output or user input.
+ * ECU derives RPM zone, temperature class, and signal state. Phase II uses
+ * pthread_cond_timedwait on cond_ecu instead of busy polling; producers call
+ * sync_notify_ecu().
  */
 
 #include "system_state.h"
-#include <unistd.h>
+#include <time.h>
 
-/* ECU updates the system every 50 milliseconds */
-#define ECU_UPDATE_INTERVAL_MS 50
+#define ECU_TIMEDWAIT_MS        50
+#define SIGNAL_CYCLE_TICKS      (3000 / ECU_TIMEDWAIT_MS)
 
-/* Number of ECU updates before the signal changes state */
-#define SIGNAL_CYCLE_TICKS (3000 / ECU_UPDATE_INTERVAL_MS)
-
-/* Keeps track of when to switch the signal state */
 static int signal_cycle_counter = 0;
 
+static void ecu_timedwait(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long add_ns = (long)ECU_TIMEDWAIT_MS * 1000000L;
+    ts.tv_nsec += add_ns;
+    while (ts.tv_nsec >= 1000000000L) {
+        ts.tv_nsec -= 1000000000L;
+        ts.tv_sec++;
+    }
 
-/*
- * ECU thread:
- * This thread runs continuously in the background.
- * It monitors the current motorcycle state and updates
- * values that are derived from the raw system data.
- */
+    pthread_mutex_lock(&mtx_ecu);
+    //CRITICAL SECTION begin -- ECU blocks on cond_ecu (timed) instead of usleep polling
+    (void)pthread_cond_timedwait(&cond_ecu, &mtx_ecu, &ts);
+    //CRITICAL SECTION end --
+    pthread_mutex_unlock(&mtx_ecu);
+}
+
 void *ecu_thread(void *arg) {
     (void)arg;
 
     while (1) {
-        /* 
-         * Cycle through signal states automatically for demonstration.
-         * In Phase 1, this allows the dashboard to show visible
-         * signal changes even without user interaction.
-         */
+        ecu_timedwait();
+
+        pthread_mutex_lock(&mtx_engine);
+        //CRITICAL SECTION begin -- ECU reads RPM/temp/engine_on; engine writes same fields
+        int rpm = g_state.rpm;
+        float temp = g_state.engine_temp_celsius;
+        bool engine_on = g_state.engine_on;
+        //CRITICAL SECTION end --
+        pthread_mutex_unlock(&mtx_engine);
+
+        pthread_mutex_lock(&mtx_motion);
+        //CRITICAL SECTION begin -- ECU resets trip when engine off; motion updates trip
+        if (!engine_on) {
+            g_state.trip_distance = 0.0;
+        }
+        //CRITICAL SECTION end --
+        pthread_mutex_unlock(&mtx_motion);
+
+        pthread_mutex_lock(&mtx_ecu);
+        //CRITICAL SECTION begin -- ECU writes derived state; dashboard reads
         signal_cycle_counter++;
 
         if (signal_cycle_counter >= SIGNAL_CYCLE_TICKS) {
@@ -57,13 +76,6 @@ void *ecu_thread(void *arg) {
             }
         }
 
-        /* 
-         * Classify the current RPM into a zone.
-         * This helps the dashboard show whether the engine
-         * is idle, normal, high, or in redline.
-         */
-        int rpm = g_state.rpm;
-
         if (rpm < 100) {
             g_state.rpm_zone = RPM_ZONE_IDLE;
         } else if (rpm <= RPM_IDLE_MAX) {
@@ -76,33 +88,17 @@ void *ecu_thread(void *arg) {
             g_state.rpm_zone = RPM_ZONE_REDLINE;
         }
 
-        /* 
-         * Classify the engine temperature in Celsius.
-         * This allows the dashboard to show whether the
-         * engine is cold, normal, hot, or overheating.
-         */
-        float temp = g_state.engine_temp_celsius;
-
-        if (temp < 60) {
+        if (temp < 60.0f) {
             g_state.temp_classification = TEMP_COLD;
-        } else if (temp <= 95) {
+        } else if (temp <= 95.0f) {
             g_state.temp_classification = TEMP_NORMAL;
-        } else if (temp <= 105) {
+        } else if (temp <= 105.0f) {
             g_state.temp_classification = TEMP_HOT;
         } else {
             g_state.temp_classification = TEMP_OVERHEAT;
         }
-
-        /* 
-         * Reset trip distance when the engine is off.
-         * The ECU controls this part of the shared state.
-         */
-        if (!g_state.engine_on) {
-            g_state.trip_distance = 0.0;
-        }
-
-        /* Wait before the next ECU update cycle */
-        usleep(ECU_UPDATE_INTERVAL_MS * 1000);
+        //CRITICAL SECTION end --
+        pthread_mutex_unlock(&mtx_ecu);
     }
 
     return NULL;

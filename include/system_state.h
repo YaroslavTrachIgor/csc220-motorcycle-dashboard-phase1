@@ -19,6 +19,16 @@
 
 #include <time.h>
 #include <stdbool.h>
+#include <pthread.h>
+
+/*
+ * Phase II — mutex lock order (always acquire at most one direction; never
+ * lock mtx_ecu before mtx_engine, etc.):
+ *   mtx_engine -> mtx_motion -> mtx_fuel -> mtx_ecu
+ *
+ * cond_engine_run + mtx_engine: motion/fuel wait until engine_on is true.
+ * cond_ecu + mtx_ecu: ECU blocks on timedwait; producers call sync_notify_ecu().
+ */
 
 /*
  * RPM zone classifications.
@@ -120,6 +130,18 @@ typedef struct {
 /* Global shared state defined in system_state.c */
 extern system_state_t g_state;
 
+/* Subsystem mutexes: engine (rpm, temp, engine_on), motion (speed, distances),
+ * fuel (fuel_gallons), ECU (rpm_zone, temp_classification, signal, headlight). */
+extern pthread_mutex_t mtx_engine;
+extern pthread_mutex_t mtx_motion;
+extern pthread_mutex_t mtx_fuel;
+extern pthread_mutex_t mtx_ecu;
+
+extern pthread_cond_t cond_engine_run;
+extern pthread_cond_t cond_ecu;
+
+/* Wake ECU after producer threads change inputs ECU derives from. */
+void sync_notify_ecu(void);
 
 /* Initializes the shared system state at program startup */
 void system_state_init(void);

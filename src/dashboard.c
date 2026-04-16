@@ -281,7 +281,7 @@ static const char *signal_state_str(signal_state_t s) {
 }
 #endif
 
-static void log_dashboard_state_changes(void) {
+static void log_dashboard_state_changes(const system_state_t *st) {
 #ifdef ENABLE_LOG
     static int initialized = 0;
 
@@ -292,14 +292,15 @@ static void log_dashboard_state_changes(void) {
     static int prev_headlight_on;
     static int prev_low_fuel;
 
-    int current_low_fuel = (g_state.fuel_gallons < FUEL_LOW_THRESHOLD);
+    //CRITICAL SECTION begin -- compare snapshot fields only (no direct g_state access)
+    int current_low_fuel = (st->fuel_gallons < FUEL_LOW_THRESHOLD);
 
     if (!initialized) {
-        prev_engine_on = g_state.engine_on;
-        prev_rpm_zone = g_state.rpm_zone;
-        prev_temp_classification = g_state.temp_classification;
-        prev_signal_state = g_state.signal_state;
-        prev_headlight_on = g_state.headlight_on;
+        prev_engine_on = st->engine_on;
+        prev_rpm_zone = st->rpm_zone;
+        prev_temp_classification = st->temp_classification;
+        prev_signal_state = st->signal_state;
+        prev_headlight_on = st->headlight_on;
         prev_low_fuel = current_low_fuel;
         initialized = 1;
 
@@ -307,80 +308,97 @@ static void log_dashboard_state_changes(void) {
         return;
     }
 
-    if (g_state.engine_on != prev_engine_on) {
+    if (st->engine_on != prev_engine_on) {
         LOG_INFO("ENGINE", "Engine turned %s",
-            g_state.engine_on ? "ON" : "OFF");
-        prev_engine_on = g_state.engine_on;
+            st->engine_on ? "ON" : "OFF");
+        prev_engine_on = st->engine_on;
     }
 
-    if (g_state.rpm_zone != prev_rpm_zone) {
+    if (st->rpm_zone != prev_rpm_zone) {
         LOG_INFO("RPM", "RPM zone changed: %s -> %s (RPM=%d)",
             rpm_zone_str(prev_rpm_zone),
-            rpm_zone_str(g_state.rpm_zone),
-            g_state.rpm);
-        prev_rpm_zone = g_state.rpm_zone;
+            rpm_zone_str(st->rpm_zone),
+            st->rpm);
+        prev_rpm_zone = st->rpm_zone;
     }
 
-    if (g_state.temp_classification != prev_temp_classification) {
-        if (g_state.temp_classification == TEMP_OVERHEAT) {
+    if (st->temp_classification != prev_temp_classification) {
+        if (st->temp_classification == TEMP_OVERHEAT) {
             LOG_WARN("TEMP", "Temperature classification changed: %s -> %s (%.1f C)",
                 temp_class_str(prev_temp_classification),
-                temp_class_str(g_state.temp_classification),
-                g_state.engine_temp_celsius);
+                temp_class_str(st->temp_classification),
+                st->engine_temp_celsius);
         } else {
             LOG_INFO("TEMP", "Temperature classification changed: %s -> %s (%.1f C)",
                 temp_class_str(prev_temp_classification),
-                temp_class_str(g_state.temp_classification),
-                g_state.engine_temp_celsius);
+                temp_class_str(st->temp_classification),
+                st->engine_temp_celsius);
         }
-        prev_temp_classification = g_state.temp_classification;
+        prev_temp_classification = st->temp_classification;
     }
 
-    if (g_state.signal_state != prev_signal_state) {
+    if (st->signal_state != prev_signal_state) {
         LOG_INFO("SIGNAL", "Signal changed: %s -> %s",
             signal_state_str(prev_signal_state),
-            signal_state_str(g_state.signal_state));
-        prev_signal_state = g_state.signal_state;
+            signal_state_str(st->signal_state));
+        prev_signal_state = st->signal_state;
     }
 
-    if (g_state.headlight_on != prev_headlight_on) {
+    if (st->headlight_on != prev_headlight_on) {
         LOG_INFO("LIGHT", "Headlight turned %s",
-            g_state.headlight_on ? "ON" : "OFF");
-        prev_headlight_on = g_state.headlight_on;
+            st->headlight_on ? "ON" : "OFF");
+        prev_headlight_on = st->headlight_on;
     }
 
     if (current_low_fuel != prev_low_fuel) {
         if (current_low_fuel) {
             LOG_WARN("FUEL", "Low fuel warning entered: %.2f gallons remaining",
-                g_state.fuel_gallons);
+                st->fuel_gallons);
         } else {
             LOG_INFO("FUEL", "Low fuel warning cleared: %.2f gallons remaining",
-                g_state.fuel_gallons);
+                st->fuel_gallons);
         }
         prev_low_fuel = current_low_fuel;
     }
+    //CRITICAL SECTION end --
 #endif
 }
 
 
 /*
- * Builds and prints the full dashboard.
- * It reads values from the shared global state and displays them.
- * No simulation logic happens here.
+ * Copies g_state under ordered subsystem mutexes for one consistent frame.
  */
-static void print_dashboard(void) {
+static void copy_system_state_snapshot(system_state_t *out) {
+    pthread_mutex_lock(&mtx_engine);
+    pthread_mutex_lock(&mtx_motion);
+    pthread_mutex_lock(&mtx_fuel);
+    pthread_mutex_lock(&mtx_ecu);
+    //CRITICAL SECTION begin -- dashboard reads all shared fields atomically for one frame
+    *out = g_state;
+    //CRITICAL SECTION end --
+    pthread_mutex_unlock(&mtx_ecu);
+    pthread_mutex_unlock(&mtx_fuel);
+    pthread_mutex_unlock(&mtx_motion);
+    pthread_mutex_unlock(&mtx_engine);
+}
+
+
+/*
+ * Builds and prints the full dashboard from a snapshot (no locks held).
+ */
+static void print_dashboard(const system_state_t *st) {
     time_t now = time(NULL);
     char time_overall[16], time_trip[16];
 
-    format_time(g_state.time_overall_start, now, time_overall);
-    format_time(g_state.time_trip_start, now, time_trip);
+    format_time(st->time_overall_start, now, time_overall);
+    format_time(st->time_trip_start, now, time_trip);
 
     /* Show temperature in Celsius or Fahrenheit based on settings */
-    float temp_display = g_state.use_celsius
-        ? g_state.engine_temp_celsius
-        : (g_state.engine_temp_celsius * 9.0f / 5.0f + 32.0f);
+    float temp_display = st->use_celsius
+        ? st->engine_temp_celsius
+        : (st->engine_temp_celsius * 9.0f / 5.0f + 32.0f);
 
-    char temp_unit = g_state.use_celsius ? 'C' : 'F';
+    char temp_unit = st->use_celsius ? 'C' : 'F';
 
     /* Set text color to green for the dashboard */
     printf("\033[32m");
@@ -391,14 +409,14 @@ static void print_dashboard(void) {
 
     /* Engine status and RPM information */
     print_line("ENG %s  │ RPM %5d [%s]",
-        g_state.engine_on ? "●" : "○",
-        g_state.rpm,
-        rpm_zone_str(g_state.rpm_zone));
+        st->engine_on ? "●" : "○",
+        st->rpm,
+        rpm_zone_str(st->rpm_zone));
 
     /* RPM bar visualization */
     {
         char bar_buf[32];
-        int filled = (int)((float)g_state.rpm / RPM_MAX * BAR_LENGTH);
+        int filled = (int)((float)st->rpm / RPM_MAX * BAR_LENGTH);
 
         if (filled < 0) {
             filled = 0;
@@ -423,12 +441,12 @@ static void print_dashboard(void) {
     print_line("TMP %5.0f°%c [%s]",
         temp_display,
         temp_unit,
-        temp_class_str(g_state.temp_classification));
+        temp_class_str(st->temp_classification));
 
     /* Speed bar visualization */
     {
         char bar_buf[32];
-        int filled = (int)((float)g_state.speed / SPEED_MAX * BAR_LENGTH);
+        int filled = (int)((float)st->speed / SPEED_MAX * BAR_LENGTH);
 
         if (filled < 0) {
             filled = 0;
@@ -446,14 +464,14 @@ static void print_dashboard(void) {
         }
         bar_buf[BAR_LENGTH] = '\0';
 
-        print_line("SPD %3d %s", g_state.speed, bar_buf);
+        print_line("SPD %3d %s", st->speed, bar_buf);
     }
 
     /* Fuel level bar and percentage */
     {
-        float fuel_pct = (g_state.fuel_gallons / FUEL_MAX_GALLONS) * 100.0f;
+        float fuel_pct = (st->fuel_gallons / FUEL_MAX_GALLONS) * 100.0f;
         char bar_buf[32];
-        int filled = (int)(g_state.fuel_gallons / FUEL_MAX_GALLONS * BAR_LENGTH);
+        int filled = (int)(st->fuel_gallons / FUEL_MAX_GALLONS * BAR_LENGTH);
 
         if (filled < 0) {
             filled = 0;
@@ -474,13 +492,13 @@ static void print_dashboard(void) {
         print_line("FUEL E%sF %5.1f%% (%.1f gal)",
             bar_buf,
             fuel_pct,
-            g_state.fuel_gallons);
+            st->fuel_gallons);
     }
 
     /* Distance converted from miles to kilometers */
     {
-        double total_km = g_state.total_distance * MILES_TO_KM;
-        double trip_km = g_state.trip_distance * MILES_TO_KM;
+        double total_km = st->total_distance * MILES_TO_KM;
+        double trip_km = st->trip_distance * MILES_TO_KM;
         print_line("DIST Total: %6.1f km   Trip: %6.1f km", total_km, trip_km);
     }
 
@@ -491,16 +509,16 @@ static void print_dashboard(void) {
 
     /* Turn signal and headlight indicators */
     {
-        const char *left = (g_state.signal_state == SIGNAL_HAZARD || g_state.signal_state == SIGNAL_LEFT)
+        const char *left = (st->signal_state == SIGNAL_HAZARD || st->signal_state == SIGNAL_LEFT)
             ? "◀ LEFT " : "       ";
-        const char *right = (g_state.signal_state == SIGNAL_HAZARD || g_state.signal_state == SIGNAL_RIGHT)
+        const char *right = (st->signal_state == SIGNAL_HAZARD || st->signal_state == SIGNAL_RIGHT)
             ? "RIGHT ▶ " : "        ";
 
-        print_line("%s%s│ %s HEADLIGHT", left, right, g_state.headlight_on ? "●" : "○");
+        print_line("%s%s│ %s HEADLIGHT", left, right, st->headlight_on ? "●" : "○");
     }
 
     /* Warning message when fuel is below the low threshold */
-    if (g_state.fuel_gallons < FUEL_LOW_THRESHOLD) {
+    if (st->fuel_gallons < FUEL_LOW_THRESHOLD) {
         print_line("⚠ LOW FUEL");
     }
 
@@ -516,9 +534,9 @@ static void print_dashboard(void) {
  * Clears the terminal, prints the dashboard again,
  * and flushes output so the update appears immediately.
  */
-void refresh_dashboard(void (*print_fn)(void)) {
+void refresh_dashboard(void (*print_fn)(const system_state_t *), const system_state_t *st) {
     printf("\033[H\033[J");
-    print_fn();
+    print_fn(st);
     fflush(stdout);
 }
 
@@ -535,8 +553,10 @@ void *dashboard_thread(void *arg) {
     LOG_INFO("DASH", "Dashboard thread started");
 
     while (1) {
-        log_dashboard_state_changes();
-        refresh_dashboard(print_dashboard);
+        system_state_t snap;
+        copy_system_state_snapshot(&snap);
+        log_dashboard_state_changes(&snap);
+        refresh_dashboard(print_dashboard, &snap);
         usleep(REFRESH_INTERVAL_US);
     }
 
