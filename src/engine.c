@@ -33,23 +33,26 @@ void *engine_thread(void *arg) {
     while (1) {
         pthread_mutex_lock(&mtx_engine);
 
-        //CRITICAL SECTION begin -- engine_on / RPM / temp; other threads read or wait on engine_on
+        // CRITICAL SECTION begin -- engine_on / RPM / temp; other threads read or wait on engine_on
         if (g_state.engine_on) {
             pthread_mutex_lock(&mtx_motion);
-            //CRITICAL SECTION begin -- engine reads speed while motion may update distance/speed
+            // CRITICAL SECTION begin -- engine reads speed while motion may update speed/distance
             int spd = g_state.speed;
-            //CRITICAL SECTION end --
+            // CRITICAL SECTION end --
+            pthread_mutex_unlock(&mtx_motion);
 
             if (spd == 0) {
-                int idle_base = 100 + (cycle % 1200);
-                g_state.rpm = 100 + (idle_base % 1200);
+                int idle_span = RPM_IDLE_MAX - RPM_IDLE_MIN + 1;
+                g_state.rpm = RPM_IDLE_MIN + (cycle % idle_span);
             } else {
                 int target_rpm = 1000 + spd * 85;
                 if (target_rpm > RPM_MAX) {
                     target_rpm = RPM_MAX;
                 }
+
                 int variation = (rand() % 101) - 50;
                 g_state.rpm = target_rpm + variation;
+
                 if (g_state.rpm < RPM_MIN) {
                     g_state.rpm = RPM_MIN;
                 }
@@ -77,10 +80,9 @@ void *engine_thread(void *arg) {
                     g_state.engine_temp_celsius = temp_target;
                 }
             }
-
-            pthread_mutex_unlock(&mtx_motion);
         } else {
             g_state.rpm = 0;
+
             if (g_state.engine_temp_celsius > TEMP_AMBIENT) {
                 g_state.engine_temp_celsius -= TEMP_COOLING_RATE * 2.0f;
                 if (g_state.engine_temp_celsius < TEMP_AMBIENT) {
@@ -88,22 +90,19 @@ void *engine_thread(void *arg) {
                 }
             }
         }
-        //CRITICAL SECTION end --
+        // CRITICAL SECTION end --
 
         engine_toggle_counter++;
         if (engine_toggle_counter >= ENGINE_ON_TOGGLE_CYCLES) {
             engine_toggle_counter = 0;
-            //CRITICAL SECTION begin -- engine_on transition; motion/fuel wait on cond_engine_run
+
+            // CRITICAL SECTION begin -- engine_on transition; motion/fuel wait on cond_engine_run
             g_state.engine_on = !g_state.engine_on;
-            pthread_cond_broadcast(&cond_engine_run);
-            if (!g_state.engine_on) {
-                pthread_mutex_lock(&mtx_motion);
-                //CRITICAL SECTION begin -- engine forces speed 0 when engine stops
-                g_state.speed = 0;
-                //CRITICAL SECTION end --
-                pthread_mutex_unlock(&mtx_motion);
+
+            if (g_state.engine_on) {
+                pthread_cond_broadcast(&cond_engine_run);
             }
-            //CRITICAL SECTION end --
+            // CRITICAL SECTION end --
         }
 
         pthread_mutex_unlock(&mtx_engine);
