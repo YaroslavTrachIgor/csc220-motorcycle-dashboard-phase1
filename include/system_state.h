@@ -67,6 +67,7 @@ typedef enum {
 /* RPM limits used in the simulation */
 #define RPM_MIN            0
 #define RPM_MAX            16500
+#define RPM_IDLE_MIN       900
 #define RPM_IDLE_MAX       1299
 #define RPM_NORMAL_MAX     7999
 #define RPM_HIGH_MAX       14499
