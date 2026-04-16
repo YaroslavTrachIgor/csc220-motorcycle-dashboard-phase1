@@ -2,12 +2,17 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 2
+ * Project: Motorcycle Dashboard — Phase II
  * File: motion.c
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * Motion subsystem: speed and distance. Phase II gates speed/distance updates
- * on engine_on using pthread_cond_wait (not a busy loop).
+ * Updates speed and odometer only when the engine is running. Thread
+ * coordination: pthread_mutex_lock(mtx_engine), then while (!engine_on)
+ * pthread_cond_wait(&cond_engine_run, &mtx_engine) — the condition variable
+ * carries the “do not advance speed until engine is ON” rule (not a plain if).
+ * Then mtx_motion is locked (order: engine -> motion) for speed/trip updates.
+ * usleep between iterations spaces motion samples; it does not poll g_state.
  */
 
 #include "system_state.h"

@@ -2,15 +2,16 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 1
+ * Project: Motorcycle Dashboard — Phase II
  * File: main.c
- * Date: 03/24/2026
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * This file is the main entry point for the BAZOOKI OS motorcycle simulation.
- * Its job is to initialize the shared system state, start all subsystem threads,
- * and keep the program running until the user interrupts it. It coordinates
- * the engine, motion, fuel, ECU, and dashboard subsystems.
+ * Program entry: calls system_state_init() (initializes g_state, mutexes, and
+ * condition variables before any thread runs), then starts five pthreads that
+ * share g_state under the subsystem locking rules in system_state.h. The main
+ * thread only sleeps on Ctrl+C; it does not touch shared motorcycle fields, so
+ * it does not participate in the engine->motion->fuel->ecu lock order.
  */
 
 #include <stdio.h>
@@ -49,7 +50,7 @@ int main(void) {
     /* Seed the random number generator for engine RPM variation */
     srand((unsigned)time(NULL));
 
-    /* Initialize the shared system state before threads start running */
+    /* Mutexes, cond vars, and default g_state — must complete before pthread_create */
     system_state_init();
 
 #ifdef ENABLE_LOG
@@ -107,18 +108,14 @@ int main(void) {
         return 1;
     }
 
-    /* 
-     * Main loop:
-     * The program stays alive while all subsystem threads run in parallel.
-     * It exits only when the user presses Ctrl+C.
+    /*
+     * Idle until SIGINT: sleep(1) is not a busy-wait; worker threads use
+     * cond_wait / cond_timedwait plus timed simulation delays (usleep).
      */
     while (g_running) {
         sleep(1);
     }
 
-    /* 
-     * In Phase 1, graceful shutdown is not implemented.
-     * The threads are not joined. The process simply ends when interrupted.
-     */
+    /* Phase III can join threads and destroy mutexes here; process exits now. */
     return 0;
 }

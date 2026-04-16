@@ -2,18 +2,26 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 2
+ * Project: Motorcycle Dashboard — Phase II
  * File: ecu.c
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * ECU derives RPM zone, temperature class, and signal state. Phase II uses
- * pthread_cond_timedwait on cond_ecu instead of busy polling; producers call
- * sync_notify_ecu().
+ * ECU enforces system rules on shared state (Phase II “ECU / system rules”):
+ *   (1) RPM zone from RPM thresholds (IDLE / NORMAL / HIGH / REDLINE).
+ *   (2) Temperature class from Celsius bands (COLD / NORMAL / HOT / OVERHEAT).
+ *   (3) Trip odometer cleared when engine_off — written under mtx_motion.
+ *   (4) Demo turn-signal cycle under mtx_ecu (hazard/left/right/off).
+ * Synchronization: pthread_cond_timedwait(&cond_ecu, &mtx_ecu, ...) replaces
+ * a tight usleep polling loop; engine/motion/fuel call sync_notify_ecu() when
+ * inputs change so the ECU reacts to events. Local copies of rpm/temp/engine_on
+ * are taken under mtx_engine before classifying under mtx_ecu.
  */
 
 #include "system_state.h"
 #include <time.h>
 
+/* Timed wait gives ~50 ms cadence and matches previous 3 s signal cycle */
 #define ECU_TIMEDWAIT_MS        50
 #define SIGNAL_CYCLE_TICKS      (3000 / ECU_TIMEDWAIT_MS)
 

@@ -2,16 +2,16 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 1
+ * Project: Motorcycle Dashboard — Phase II
  * File: dashboard.c
- * Date: 03/24/2026
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * This file implements the dashboard subsystem of the motorcycle simulation.
- * Its job is to read the shared system state and display a formatted dashboard
- * in the terminal. This file does not control the simulation itself. It only
- * handles output such as engine status, RPM, temperature, speed, fuel level,
- * distance, timer values, signal indicators, and warning messages.
+ * Dashboard is read-only for simulation: each frame copies g_state under
+ * mtx_engine, mtx_motion, mtx_fuel, mtx_ecu in that fixed order (same as the
+ * rest of the program), then prints from a stack snapshot so printf never
+ * holds subsystem locks. State-change logging compares two snapshots so it
+ * never races producers.
  */
 
 #define _XOPEN_SOURCE 700
@@ -531,8 +531,7 @@ static void print_dashboard(const system_state_t *st) {
 
 
 /*
- * Clears the terminal, prints the dashboard again,
- * and flushes output so the update appears immediately.
+ * Renders one frame from an already-captured snapshot (caller held locks during copy).
  */
 void refresh_dashboard(void (*print_fn)(const system_state_t *), const system_state_t *st) {
     printf("\033[H\033[J");
@@ -542,10 +541,9 @@ void refresh_dashboard(void (*print_fn)(const system_state_t *), const system_st
 
 
 /*
- * Dashboard thread:
- * This thread runs continuously during the program.
- * Its only job is to refresh the terminal dashboard at a fixed interval
- * so the user can see updated motorcycle values in real time.
+ * Dashboard thread: each loop copies g_state under the four subsystem mutexes
+ * (see copy_system_state_snapshot), then logs and draws from `snap` only.
+ * REFRESH_INTERVAL_US spaces screen updates; it is not a spin on g_state.
  */
 void *dashboard_thread(void *arg) {
     (void)arg;

@@ -2,12 +2,17 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 2
+ * Project: Motorcycle Dashboard — Phase II
  * File: fuel.c
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * Fuel consumption. Phase II: pthread_cond_wait until engine is ON; consumption
- * uses mutex order engine -> motion -> fuel.
+ * Fuel drain uses RPM and speed snapshots. Thread coordination: the same
+ * cond_engine_run pattern as motion — pthread_cond_wait on cond_engine_run
+ * with mtx_engine while engine_off so consumption does not run when the engine
+ * is stopped (assignment: consumption logic tied to a real pthread_cond_t).
+ * Lock order for each tick: mtx_engine -> mtx_motion (read speed) -> mtx_fuel
+ * (update fuel_gallons). usleep is the fuel subsystem period, not busy polling.
  */
 
 #include "system_state.h"

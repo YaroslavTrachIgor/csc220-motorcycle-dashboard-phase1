@@ -2,16 +2,16 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 2
+ * Project: Motorcycle Dashboard — Phase II
  * File: system_state.c
- * Date: 03/24/2026
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * This file implements the shared system state for the motorcycle simulation.
- * It defines the global system state structure and initializes all starting
- * values used by the subsystems. These values include time, engine status,
- * RPM, temperature, speed, distance, fuel, signals, and display settings.
- * Phase II adds pthread mutexes and condition variables for safe sharing.
+ * Defines `g_state` and all subsystem synchronization objects. Phase II keeps
+ * the Phase I centralized struct and adds mtx_engine/mtx_motion/mtx_fuel/mtx_ecu
+ * plus cond_engine_run and cond_ecu. system_state_init() must run before any
+ * pthread is created so mutex/cond init and default field values are visible
+ * to every thread start.
  */
 
 #include "system_state.h"
@@ -29,6 +29,10 @@ pthread_mutex_t mtx_ecu;
 pthread_cond_t cond_engine_run;
 pthread_cond_t cond_ecu;
 
+/*
+ * ECU blocks on cond_ecu (timed wait). Producers broadcast here after updating
+ * shared inputs so the ECU thread runs rule logic without busy-waiting on g_state.
+ */
 void sync_notify_ecu(void) {
     pthread_cond_broadcast(&cond_ecu);
 }

@@ -2,13 +2,19 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 2
+ * Project: Motorcycle Dashboard — Phase II
  * File: engine.c
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * Engine subsystem: RPM and temperature simulation. Phase II uses mutexes
- * and condition variables; engine_on is toggled periodically so motion/fuel
- * can coordinate on cond_engine_run.
+ * Simulates RPM and coolant temperature. All writes to rpm, engine_temp_celsius,
+ * and engine_on happen under mtx_engine. Speed is read under mtx_motion after
+ * mtx_engine (global lock order). When engine_on flips to false, this thread
+ * zeros speed under mtx_motion so motion/fuel see a consistent stop. Periodic
+ * engine_on toggles call pthread_cond_broadcast(&cond_engine_run) so motion
+ * and fuel coordinate via pthread_cond_wait (not polling). sync_notify_ecu()
+ * wakes the ECU after each engine update. The outer while(1) plus usleep is
+ * the simulation timestep, not a spin-wait on shared variables.
  */
 
 #include "system_state.h"
@@ -21,7 +27,7 @@
 #define TEMP_IDLE_TARGET          75.0f
 #define TEMP_AMBIENT              20.0f
 
-/* ~15 s at 50 ms per tick — demo engine stop/start for Phase II coordination */
+/* ~15 s at 50 ms per tick — demonstrates fuel/motion blocking while engine off */
 #define ENGINE_ON_TOGGLE_CYCLES   300
 
 void *engine_thread(void *arg) {
