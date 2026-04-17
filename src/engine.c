@@ -30,6 +30,13 @@ void *engine_thread(void *arg) {
     int cycle = 0;
     int engine_toggle_counter = 0;
 
+    /* 
+     * Phase II startup delay:
+     * This gives the dashboard and ECU time to reflect the command-line
+     * initialized state before the engine simulation begins updating RPM.
+     */
+    sleep(1);
+
     while (1) {
         pthread_mutex_lock(&mtx_engine);
 

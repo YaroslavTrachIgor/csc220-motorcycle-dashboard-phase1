@@ -146,4 +146,11 @@ void sync_notify_ecu(void);
 /* Initializes the shared system state at program startup */
 void system_state_init(void);
 
+/*
+ * Initializes the shared system state using command-line arguments.
+ * This is used in Phase II so the simulation can begin with user-defined
+ * startup values instead of only hardcoded or randomized defaults.
+ */
+void system_state_init_from_args(int rpm, int engine_state, int speed, int fuel_level, char accel_mode);
+
 #endif /* SYSTEM_STATE_H */

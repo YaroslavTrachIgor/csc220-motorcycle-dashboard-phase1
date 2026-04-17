@@ -18,6 +18,7 @@
 
 #include "system_state.h"
 #include "log.h"
+#include <unistd.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <unistd.h>

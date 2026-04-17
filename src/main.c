@@ -40,7 +40,27 @@ static void signal_handler(int sig) {
 }
 
 
-int main(void) {
+/*
+ * Command-line initialization (Phase II):
+ * This function reads initial values from the command line and initializes
+ * the system state accordingly. This logic is isolated so it can be easily
+ * removed in Phase III.
+ */
+static void init_from_command_line(int argc, char *argv[]) {
+    /* Assume valid inputs as per assignment instructions */
+
+    int rpm = atoi(argv[1]);
+    int engine_state = atoi(argv[2]);
+    int speed = atoi(argv[3]);
+    int fuel_level = atoi(argv[4]);
+    char accel_mode = argv[5][0];
+
+    /* Initialize system state using provided values */
+    system_state_init_from_args(rpm, engine_state, speed, fuel_level, accel_mode);
+}
+
+
+int main(int argc, char *argv[]) {
     pthread_t engine_tid, motion_tid, fuel_tid, ecu_tid, dashboard_tid;
 
     /* Enable proper display of special UTF-8 characters in the terminal */
@@ -50,7 +70,7 @@ int main(void) {
     srand((unsigned)time(NULL));
 
     /* Initialize the shared system state before threads start running */
-    system_state_init();
+    init_from_command_line(argc, argv);
 
 #ifdef ENABLE_LOG
     /*
