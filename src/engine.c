@@ -36,6 +36,13 @@ void *engine_thread(void *arg) {
     int cycle = 0;                  // keeps track of total update cycles
     int engine_toggle_counter = 0;  // counts cycles before toggling engine on/off
 
+    /* 
+     * Phase II startup delay:
+     * This gives the dashboard and ECU time to reflect the command-line
+     * initialized state before the engine simulation begins updating RPM.
+     */
+    sleep(1);
+
     while (1) {
         /* Lock engine mutex before reading/writing engine-related shared state */
         pthread_mutex_lock(&mtx_engine);

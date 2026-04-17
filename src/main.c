@@ -12,6 +12,10 @@
  * share g_state under the subsystem locking rules in system_state.h. The main
  * thread only sleeps on Ctrl+C; it does not touch shared motorcycle fields, so
  * it does not participate in the engine->motion->fuel->ecu lock order.
+ *
+ * Optional Phase II CLI (six arguments after program name): rpm, engine_state,
+ * speed, fuel_level (%), accel_mode. If fewer than six args are given, the
+ * program uses system_state_init() defaults (backward compatible with make run).
  */
 
 #include <stdio.h>
@@ -41,7 +45,34 @@ static void signal_handler(int sig) {
 }
 
 
-int main(void) {
+/*
+ * Command-line initialization (Phase II):
+ * This function reads initial values from the command line and initializes
+ * the system state accordingly. This logic is isolated so it can be easily
+ * removed in Phase III.
+ */
+static void init_from_command_line(char *argv[]) {
+    int rpm = atoi(argv[1]);
+    int engine_state = atoi(argv[2]);
+    int speed = atoi(argv[3]);
+    int fuel_level = atoi(argv[4]);
+    char accel_mode = argv[5][0];
+
+    /* Initialize system state using provided values */
+    system_state_init_from_args(rpm, engine_state, speed, fuel_level, accel_mode);
+}
+
+
+static void init_system_state(int argc, char *argv[]) {
+    if (argc >= 6) {
+        init_from_command_line(argv);
+    } else {
+        system_state_init();
+    }
+}
+
+
+int main(int argc, char *argv[]) {
     pthread_t engine_tid, motion_tid, fuel_tid, ecu_tid, dashboard_tid;
 
     /* Enable proper display of special UTF-8 characters in the terminal */
@@ -50,8 +81,8 @@ int main(void) {
     /* Seed the random number generator for engine RPM variation */
     srand((unsigned)time(NULL));
 
-    /* Mutexes, cond vars, and default g_state — must complete before pthread_create */
-    system_state_init();
+    /* Mutex/cond static init + g_state — must complete before pthread_create */
+    init_system_state(argc, argv);
 
 #ifdef ENABLE_LOG
     /*
