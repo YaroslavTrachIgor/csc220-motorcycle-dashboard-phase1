@@ -2,16 +2,30 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 1
+ * Project: Motorcycle Dashboard — Phase II (synchronization)
  * File: system_state.h
- * Date: 03/24/2026
+ * Date: 03/24/2026 (Phase I); Phase II sync — 04/15/2026
  *
  * Description:
- * This header file defines the shared system state for the BAZOOKI OS
- * motorcycle simulation. It includes the enums, constants, structure,
- * and function declaration needed by all subsystems. These shared values
- * allow the engine, motion, fuel, ECU, and dashboard threads to access
- * the same motorcycle data during the simulation.
+ * Central shared motorcycle state (`system_state_t` / `g_state`) for all
+ * subsystems — same Phase I layout, extended with POSIX synchronization only.
+ *
+ * Mutex groups (no single global lock):
+ *   mtx_engine — rpm, engine_temp_celsius, engine_on
+ *   mtx_motion — speed, total_distance, trip_distance
+ *   mtx_fuel   — fuel_gallons
+ *   mtx_ecu    — rpm_zone, temp_classification, signal_state, headlight_on
+ *
+ * Lock acquisition order (every thread that takes more than one lock):
+ *   mtx_engine -> mtx_motion -> mtx_fuel -> mtx_ecu
+ * This strict order prevents circular wait and deadlocks when threads overlap
+ * their critical sections (for example engine then motion, or dashboard snapshot).
+ *
+ * Thread coordination (not only mutual exclusion):
+ *   cond_engine_run + mtx_engine — predicate is engine_on; motion and fuel
+ *   block in pthread_cond_wait until the engine broadcasts after starting.
+ *   cond_ecu + mtx_ecu — ECU uses pthread_cond_timedwait so it reacts to
+ *   producer updates via sync_notify_ecu() without spinning on shared data.
  */
 
 #ifndef SYSTEM_STATE_H
@@ -20,15 +34,6 @@
 #include <time.h>
 #include <stdbool.h>
 #include <pthread.h>
-
-/*
- * Phase II — mutex lock order (always acquire at most one direction; never
- * lock mtx_ecu before mtx_engine, etc.):
- *   mtx_engine -> mtx_motion -> mtx_fuel -> mtx_ecu
- *
- * cond_engine_run + mtx_engine: motion/fuel wait until engine_on is true.
- * cond_ecu + mtx_ecu: ECU blocks on timedwait; producers call sync_notify_ecu().
- */
 
 /*
  * RPM zone classifications.
@@ -67,6 +72,7 @@ typedef enum {
 /* RPM limits used in the simulation */
 #define RPM_MIN            0
 #define RPM_MAX            16500
+#define RPM_IDLE_MIN       900
 #define RPM_IDLE_MAX       1299
 #define RPM_NORMAL_MAX     7999
 #define RPM_HIGH_MAX       14499
@@ -140,7 +146,10 @@ extern pthread_mutex_t mtx_ecu;
 extern pthread_cond_t cond_engine_run;
 extern pthread_cond_t cond_ecu;
 
-/* Wake ECU after producer threads change inputs ECU derives from. */
+/*
+ * Wake ECU after engine / motion / fuel commit changes to RPM, temperature,
+ * speed, fuel, or engine_on — ECU waits on cond_ecu instead of polling g_state.
+ */
 void sync_notify_ecu(void);
 
 /* Initializes the shared system state at program startup */

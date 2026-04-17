@@ -2,19 +2,23 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 2
+ * Project: Motorcycle Dashboard — Phase II
  * File: motion.c
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * Motion subsystem: speed and distance. Phase II gates speed/distance updates
- * on engine_on using pthread_cond_wait (not a busy loop).
+ * Updates speed and distance under mtx_engine then mtx_motion (global order).
+ * Thread coordination: pthread_cond_wait on cond_engine_run while the engine
+ * is OFF and speed is already 0 — so the thread does not busy-wait, but still
+ * allows distance to accumulate while coasting (engine OFF, speed > 0) until
+ * the bike stops. Periodic usleep spaces motion samples; it does not spin on g_state.
  */
 
 #include "system_state.h"
 #include <unistd.h>
 
 #define MOTION_UPDATE_INTERVAL_MS 1000
-#define MPH_TO_MPS (1.0 / 3600.0)
+#define MPH_TO_MILES_PER_TICK (1.0 / 3600.0)
 
 void *motion_thread(void *arg) {
     (void)arg;
@@ -23,12 +27,26 @@ void *motion_thread(void *arg) {
 
     while (1) {
         pthread_mutex_lock(&mtx_engine);
-        //CRITICAL SECTION begin -- cond_engine_run wait + speed/distance; lock order engine->motion
-        while (!g_state.engine_on) {
-            pthread_cond_wait(&cond_engine_run, &mtx_engine);
-        }
         pthread_mutex_lock(&mtx_motion);
+        // CRITICAL SECTION begin -- motion reads engine_on and updates speed/distance; lock order engine->motion
+
+        /*
+         * Wait only when the motorcycle is fully stopped and engine is OFF.
+         * If engine is OFF but speed > 0, do not wait yet because the bike
+         * may still be rolling and distance must continue accumulating until
+         * speed reaches 0.
+         */
+        while (!g_state.engine_on && g_state.speed == 0) {
+            pthread_mutex_unlock(&mtx_motion);
+            pthread_cond_wait(&cond_engine_run, &mtx_engine);
+            pthread_mutex_lock(&mtx_motion);
+        }
+
         if (g_state.engine_on) {
+            /*
+             * Normal Phase I motion behavior while engine is ON.
+             * ECU may still cap speed separately in Phase II.
+             */
             g_state.speed += speed_direction;
 
             if (g_state.speed >= 70) {
@@ -38,17 +56,22 @@ void *motion_thread(void *arg) {
                 g_state.speed = 50;
                 speed_direction = 1;
             }
-
-            double delta_miles = g_state.speed * MPH_TO_MPS;
-            g_state.total_distance += delta_miles;
-            g_state.trip_distance += delta_miles;
-        } else {
-            g_state.speed = 0;
         }
 
+        /*
+         * Distance should accumulate whenever the motorcycle is still moving,
+         * even if the engine has been turned OFF and the bike is coasting.
+         * Once speed reaches 0, distance stops accumulating naturally.
+         */
+        if (g_state.speed > 0) {
+            double delta_miles = g_state.speed * MPH_TO_MILES_PER_TICK;
+            g_state.total_distance += delta_miles;
+            g_state.trip_distance += delta_miles;
+        }
+
+        // CRITICAL SECTION end --
         pthread_mutex_unlock(&mtx_motion);
         pthread_mutex_unlock(&mtx_engine);
-        //CRITICAL SECTION end --
 
         sync_notify_ecu();
 
