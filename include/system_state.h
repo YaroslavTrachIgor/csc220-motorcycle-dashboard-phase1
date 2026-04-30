@@ -12,9 +12,11 @@
  *
  * Mutex groups (no single global lock):
  *   mtx_engine — rpm, engine_temp_celsius, engine_on
- *   mtx_motion — speed, total_distance, trip_distance
- *   mtx_fuel   — fuel_gallons
- *   mtx_ecu    — rpm_zone, temp_classification, signal_state, headlight_on
+ *   mtx_motion — speed, total_distance, trip_distance, accel/decel/cruise,
+ *                pending W/S steps, timer pause flags / trip timer running
+ *   mtx_fuel   — fuel_gallons, refueling_active, refuel_deadline, needs_refuel_to_start
+ *   mtx_ecu    — rpm_zone, temp_classification, signal_state, headlight_on,
+ *                signal_left_on, signal_right_on, hazard_on
  *
  * Lock acquisition order (every thread that takes more than one lock):
  *   mtx_engine -> mtx_motion -> mtx_fuel -> mtx_ecu
@@ -31,6 +33,7 @@
 #ifndef SYSTEM_STATE_H
 #define SYSTEM_STATE_H
 
+#include <signal.h>
 #include <time.h>
 #include <stdbool.h>
 #include <pthread.h>
@@ -82,6 +85,12 @@ typedef enum {
 #define SPEED_MIN          0
 #define SPEED_MAX          200
 
+/* Phase III W/S non-linear driver model defaults (dimensionless rates; scaled by dt) */
+#define DEFAULT_ACCEL_RATE 0.35f
+#define DEFAULT_DECEL_RATE 0.18f
+
+#define REFUEL_DURATION_SEC 10
+
 /* Fuel limits in gallons */
 #define FUEL_MIN_GALLONS   0.0
 #define FUEL_MAX_GALLONS   4.7
@@ -112,9 +121,18 @@ typedef struct {
     int speed;
     double total_distance;
     double trip_distance;
+    float accel_rate;
+    float decel_rate;
+    bool cruise_active;
+    /* Consumed each motion tick; incremented by input on W/S */
+    int pending_accel_steps;
+    int pending_decel_steps;
 
     /* Fuel subsystem outputs */
     float fuel_gallons;
+    bool refueling_active;
+    time_t refuel_deadline;
+    bool needs_refuel_to_start;
 
     /* ECU outputs and related state */
     bool engine_on;
@@ -122,11 +140,17 @@ typedef struct {
     temp_classification_t temp_classification;
     signal_state_t signal_state;
     bool headlight_on;
+    bool signal_left_on;
+    bool signal_right_on;
+    bool hazard_on;
 
     /* Time tracking values */
-    time_t time_overall_start;   /* Random offset at program start */
-    time_t time_trip_start;      /* When engine was last turned on */
+    time_t time_overall_start;   /* Anchor so (now - start) = overall elapsed while running */
+    time_t time_trip_start;      /* Trip timer anchor while trip_timer_running */
     time_t program_start;        /* When program started */
+    bool overall_timer_paused;
+    long overall_elapsed_sec;    /* Frozen overall HH:MM:SS when paused after kill */
+    bool trip_timer_running;
 
     /* User display preference */
     bool use_celsius;
@@ -135,6 +159,9 @@ typedef struct {
 
 /* Global shared state defined in system_state.c */
 extern system_state_t g_state;
+
+/* Phase III: cooperative shutdown (Q, SIGINT); threads exit loops when non-zero */
+extern volatile sig_atomic_t g_shutdown_request;
 
 /* Subsystem mutexes: engine (rpm, temp, engine_on), motion (speed, distances),
  * fuel (fuel_gallons), ECU (rpm_zone, temp_classification, signal, headlight). */
@@ -160,6 +187,19 @@ void system_state_init(void);
  * This is used in Phase II so the simulation can begin with user-defined
  * startup values instead of only hardcoded or randomized defaults.
  */
-void system_state_init_from_args(int rpm, int engine_state, int speed, int fuel_level, char accel_mode);
+void system_state_init_from_args(int rpm, int engine_state, int speed, int fuel_level,
+                                 char accel_mode, float accel_rate, float decel_rate);
+
+/*
+ * Kill switch semantics (engine was ON): engine off, speed 0, trip distance 0,
+ * timers paused per Phase III; does not set needs_refuel_to_start.
+ */
+void system_engine_kill(void);
+
+/*
+ * Ignition: no-op if needs_refuel_to_start or refueling_active (caller may pre-check).
+ * Resumes overall timer if paused; starts trip timer and clears cruise.
+ */
+void system_engine_ignite(void);
 
 #endif /* SYSTEM_STATE_H */

@@ -1,21 +1,5 @@
 /**
- * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
- * Course: CSC 220
- * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard — Phase II
- * File: main.c
- * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
- *
- * Description:
- * Program entry: calls system_state_init() (initializes g_state, mutexes, and
- * condition variables before any thread runs), then starts five pthreads that
- * share g_state under the subsystem locking rules in system_state.h. The main
- * thread only sleeps on Ctrl+C; it does not touch shared motorcycle fields, so
- * it does not participate in the engine->motion->fuel->ecu lock order.
- *
- * Optional Phase II CLI (six arguments after program name): rpm, engine_state,
- * speed, fuel_level (%), accel_mode. If fewer than six args are given, the
- * program uses system_state_init() defaults (backward compatible with make run).
+ * Motorcycle Dashboard — Phase III: threads, keyboard input, graceful shutdown.
  */
 
 #include <stdio.h>
@@ -28,67 +12,83 @@
 #include <string.h>
 #include "system_state.h"
 #include "subsystems.h"
+#include "input.h"
 #include "log.h"
 
-/* Global flag used to keep the program running */
-static volatile int g_running = 1;
-
-
-/*
- * Signal handler:
- * This function runs when the user presses Ctrl+C.
- * It changes the running flag so the main loop can stop.
- */
 static void signal_handler(int sig) {
     (void)sig;
-    g_running = 0;
+    g_shutdown_request = 1;
 }
 
+static void wake_all_blocked_threads(void) {
+    pthread_cond_broadcast(&cond_engine_run);
+    pthread_mutex_lock(&mtx_ecu);
+    pthread_cond_broadcast(&cond_ecu);
+    pthread_mutex_unlock(&mtx_ecu);
+}
 
-/*
- * Command-line initialization (Phase II):
- * This function reads initial values from the command line and initializes
- * the system state accordingly. This logic is isolated so it can be easily
- * removed in Phase III.
- */
 static void init_from_command_line(char *argv[]) {
     int rpm = atoi(argv[1]);
     int engine_state = atoi(argv[2]);
     int speed = atoi(argv[3]);
     int fuel_level = atoi(argv[4]);
     char accel_mode = argv[5][0];
+    float accel_rate = DEFAULT_ACCEL_RATE;
+    float decel_rate = DEFAULT_DECEL_RATE;
 
-    /* Initialize system state using provided values */
-    system_state_init_from_args(rpm, engine_state, speed, fuel_level, accel_mode);
+    if (argv[6] != NULL && argv[7] != NULL) {
+        float ar = (float)strtod(argv[6], NULL);
+        float dr = (float)strtod(argv[7], NULL);
+        if (ar > 0.0f) {
+            accel_rate = ar;
+        }
+        if (dr > 0.0f) {
+            decel_rate = dr;
+        }
+    }
+
+    system_state_init_from_args(rpm, engine_state, speed, fuel_level, accel_mode,
+                                accel_rate, decel_rate);
 }
 
-
 static void init_system_state(int argc, char *argv[]) {
-    if (argc >= 6) {
+    if (argc >= 8) {
         init_from_command_line(argv);
+    } else if (argc >= 6) {
+        char *extended_argv[8];
+        for (int i = 0; i < 6; i++) {
+            extended_argv[i] = argv[i];
+        }
+        char buf_a[32];
+        char buf_d[32];
+        snprintf(buf_a, sizeof buf_a, "%f", (double)DEFAULT_ACCEL_RATE);
+        snprintf(buf_d, sizeof buf_d, "%f", (double)DEFAULT_DECEL_RATE);
+        extended_argv[6] = buf_a;
+        extended_argv[7] = buf_d;
+        init_from_command_line(extended_argv);
     } else {
         system_state_init();
     }
 }
 
+static void destroy_sync_primitives(void) {
+    pthread_mutex_destroy(&mtx_engine);
+    pthread_mutex_destroy(&mtx_motion);
+    pthread_mutex_destroy(&mtx_fuel);
+    pthread_mutex_destroy(&mtx_ecu);
+    pthread_cond_destroy(&cond_engine_run);
+    pthread_cond_destroy(&cond_ecu);
+}
 
 int main(int argc, char *argv[]) {
-    pthread_t engine_tid, motion_tid, fuel_tid, ecu_tid, dashboard_tid;
+    pthread_t engine_tid, motion_tid, fuel_tid, ecu_tid, dashboard_tid, input_tid;
 
-    /* Enable proper display of special UTF-8 characters in the terminal */
     setlocale(LC_CTYPE, "");
-
-    /* Seed the random number generator for engine RPM variation */
     srand((unsigned)time(NULL));
 
-    /* Mutex/cond static init + g_state — must complete before pthread_create */
     init_system_state(argc, argv);
 
 #ifdef ENABLE_LOG
-    /*
-     * Logging goes to a file by default so lines are not erased by the
-     * dashboard full-screen refresh. Use BAZOOKI_LOG_FILE=- for stderr.
-     */
     {
         const char *path = getenv("BAZOOKI_LOG_FILE");
         if (path && strcmp(path, "-") == 0) {
@@ -104,49 +104,88 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    /* Register Ctrl+C handler so the program can stop when interrupted */
+    if (!input_terminal_setup()) {
+        fprintf(stderr, "BAZOOKI OS: stdin is not a TTY — keyboard controls disabled; use Ctrl+C to exit.\n");
+    }
+
     signal(SIGINT, signal_handler);
 
-    /* Create subsystem threads */
-
-    /* Engine thread handles RPM and temperature simulation */
     if (pthread_create(&engine_tid, NULL, engine_thread, NULL) != 0) {
         perror("pthread_create engine");
+        input_terminal_restore();
         return 1;
     }
-
-    /* Motion thread handles speed and distance updates */
     if (pthread_create(&motion_tid, NULL, motion_thread, NULL) != 0) {
         perror("pthread_create motion");
+        g_shutdown_request = 1;
+        wake_all_blocked_threads();
+        pthread_join(engine_tid, NULL);
+        input_terminal_restore();
         return 1;
     }
-
-    /* Fuel thread handles fuel consumption over time */
     if (pthread_create(&fuel_tid, NULL, fuel_thread, NULL) != 0) {
         perror("pthread_create fuel");
+        g_shutdown_request = 1;
+        wake_all_blocked_threads();
+        pthread_join(motion_tid, NULL);
+        pthread_join(engine_tid, NULL);
+        input_terminal_restore();
         return 1;
     }
-
-    /* ECU thread updates derived values such as RPM zone and temperature class */
     if (pthread_create(&ecu_tid, NULL, ecu_thread, NULL) != 0) {
         perror("pthread_create ecu");
+        g_shutdown_request = 1;
+        wake_all_blocked_threads();
+        pthread_join(fuel_tid, NULL);
+        pthread_join(motion_tid, NULL);
+        pthread_join(engine_tid, NULL);
+        input_terminal_restore();
         return 1;
     }
-
-    /* Dashboard thread continuously prints the formatted dashboard */
     if (pthread_create(&dashboard_tid, NULL, dashboard_thread, NULL) != 0) {
         perror("pthread_create dashboard");
+        g_shutdown_request = 1;
+        wake_all_blocked_threads();
+        pthread_join(ecu_tid, NULL);
+        pthread_join(fuel_tid, NULL);
+        pthread_join(motion_tid, NULL);
+        pthread_join(engine_tid, NULL);
+        input_terminal_restore();
+        return 1;
+    }
+    if (pthread_create(&input_tid, NULL, input_thread, NULL) != 0) {
+        perror("pthread_create input");
+        g_shutdown_request = 1;
+        wake_all_blocked_threads();
+        pthread_join(dashboard_tid, NULL);
+        pthread_join(ecu_tid, NULL);
+        pthread_join(fuel_tid, NULL);
+        pthread_join(motion_tid, NULL);
+        pthread_join(engine_tid, NULL);
+        input_terminal_restore();
         return 1;
     }
 
-    /*
-     * Idle until SIGINT: sleep(1) is not a busy-wait; worker threads use
-     * cond_wait / cond_timedwait plus timed simulation delays (usleep).
-     */
-    while (g_running) {
+    while (!g_shutdown_request) {
         sleep(1);
     }
 
-    /* Phase III can join threads and destroy mutexes here; process exits now. */
+    wake_all_blocked_threads();
+
+    pthread_join(input_tid, NULL);
+    pthread_join(dashboard_tid, NULL);
+    pthread_join(ecu_tid, NULL);
+    pthread_join(fuel_tid, NULL);
+    pthread_join(motion_tid, NULL);
+    pthread_join(engine_tid, NULL);
+
+    input_terminal_restore();
+
+#ifdef ENABLE_LOG
+    log_close();
+#endif
+
+    destroy_sync_primitives();
+
     return 0;
 }

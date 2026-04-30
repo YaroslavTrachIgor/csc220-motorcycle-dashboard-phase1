@@ -15,19 +15,19 @@
 #ifndef SUBSYSTEMS_H
 #define SUBSYSTEMS_H
 
-/* Engine: RPM/temperature; owns engine_on transitions and cond_engine_run broadcast */
+/* Engine: RPM/temperature; engine_on from ignition/kill/refuel (Phase III) */
 void *engine_thread(void *arg);
 
-/* Motion: speed and odometer; waits on cond_engine_run until engine_on */
+/* Motion: speed/distance; Phase III W/S/C via pending steps */
 void *motion_thread(void *arg);
 
-/* Fuel: consumption; waits on cond_engine_run; lock order engine->motion->fuel */
+/* Fuel: consumption; refuel timer; empty-tank kill */
 void *fuel_thread(void *arg);
 
-/* ECU: classifications, signal demo, trip reset rule; waits on cond_ecu (timed) */
+/* ECU: classifications, driver signals (A/D/Z), rule enforcement */
 void *ecu_thread(void *arg);
 
-/* Dashboard: snapshot under all subsystem locks, then render (no simulation) */
+/* Dashboard: snapshot under all subsystem locks (Phase III timer display) */
 void *dashboard_thread(void *arg);
 
 #endif /* SUBSYSTEMS_H */
