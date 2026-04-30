@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
+#include <stdbool.h>
 
 system_state_t g_state;
 
@@ -82,30 +83,43 @@ void system_state_init_from_args(int rpm, int engine_state, int speed, int fuel_
 
     pthread_mutex_lock(&mtx_motion);
     g_state.speed = speed;
+
     if (accel_rate > 0.0f) {
         g_state.accel_rate = accel_rate;
     }
+
     if (decel_rate > 0.0f) {
         g_state.decel_rate = decel_rate;
     }
+
     g_state.trip_timer_running = engine_started;
+
     if (!engine_started) {
         g_state.overall_timer_paused = true;
         g_state.overall_elapsed_sec = (long)(time(NULL) - g_state.time_overall_start);
+
         if (g_state.overall_elapsed_sec < 0) {
             g_state.overall_elapsed_sec = 0;
         }
     }
+
     pthread_mutex_unlock(&mtx_motion);
 
     pthread_mutex_lock(&mtx_fuel);
     g_state.fuel_gallons = ((float)fuel_level / 100.0f) * (float)FUEL_MAX_GALLONS;
+
     if (g_state.fuel_gallons < (float)FUEL_MIN_GALLONS) {
         g_state.fuel_gallons = (float)FUEL_MIN_GALLONS;
     }
+
     if (g_state.fuel_gallons > (float)FUEL_MAX_GALLONS) {
         g_state.fuel_gallons = (float)FUEL_MAX_GALLONS;
     }
+
+    if (g_state.fuel_gallons <= (float)FUEL_MIN_GALLONS) {
+        g_state.needs_refuel_to_start = true;
+    }
+
     pthread_mutex_unlock(&mtx_fuel);
 
     if (engine_started) {
@@ -119,25 +133,33 @@ void system_engine_kill(void) {
     time_t now = time(NULL);
 
     pthread_mutex_lock(&mtx_engine);
+
     if (!g_state.engine_on) {
         pthread_mutex_unlock(&mtx_engine);
         return;
     }
+
     g_state.engine_on = false;
+    g_state.rpm = 0;
+
     pthread_mutex_unlock(&mtx_engine);
 
     pthread_mutex_lock(&mtx_motion);
+
     g_state.speed = 0;
     g_state.trip_distance = 0.0;
     g_state.overall_elapsed_sec = (long)(now - g_state.time_overall_start);
+
     if (g_state.overall_elapsed_sec < 0) {
         g_state.overall_elapsed_sec = 0;
     }
+
     g_state.overall_timer_paused = true;
     g_state.trip_timer_running = false;
     g_state.cruise_active = false;
     g_state.pending_accel_steps = 0;
     g_state.pending_decel_steps = 0;
+
     pthread_mutex_unlock(&mtx_motion);
 
     sync_notify_ecu();
@@ -145,23 +167,42 @@ void system_engine_kill(void) {
 
 void system_engine_ignite(void) {
     pthread_mutex_lock(&mtx_engine);
-    if (g_state.engine_on || g_state.needs_refuel_to_start || g_state.refueling_active) {
+    pthread_mutex_lock(&mtx_fuel);
+
+    bool no_fuel = (g_state.fuel_gallons <= (float)FUEL_MIN_GALLONS);
+
+    if (g_state.engine_on ||
+        g_state.needs_refuel_to_start ||
+        g_state.refueling_active ||
+        no_fuel) {
+        pthread_mutex_unlock(&mtx_fuel);
         pthread_mutex_unlock(&mtx_engine);
+        sync_notify_ecu();
         return;
     }
+
     g_state.engine_on = true;
+
+    pthread_mutex_unlock(&mtx_fuel);
+
     pthread_cond_broadcast(&cond_engine_run);
+
     pthread_mutex_unlock(&mtx_engine);
 
     pthread_mutex_lock(&mtx_motion);
+
     if (g_state.overall_timer_paused) {
         time_t now = time(NULL);
         g_state.time_overall_start = now - g_state.overall_elapsed_sec;
         g_state.overall_timer_paused = false;
     }
+
     g_state.trip_timer_running = true;
     g_state.time_trip_start = time(NULL);
     g_state.cruise_active = false;
+    g_state.pending_accel_steps = 0;
+    g_state.pending_decel_steps = 0;
+
     pthread_mutex_unlock(&mtx_motion);
 
     sync_notify_ecu();
