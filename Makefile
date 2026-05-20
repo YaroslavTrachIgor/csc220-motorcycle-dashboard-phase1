@@ -13,9 +13,13 @@ BIN = bazooki_os
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
 OBJECTS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
-.PHONY: all clean run
+.PHONY: all clean run bazooki-launcher
 
-all: $(BUILD_DIR) $(BIN)
+# Ensure the CLI wrapper script is executable (macOS/Linux).
+bazooki-launcher: $(BIN)
+	chmod +x bazooki
+
+all: $(BUILD_DIR) $(BIN) bazooki-launcher
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)

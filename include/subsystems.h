@@ -2,40 +2,32 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 1
+ * Project: Motorcycle Dashboard — Phase II
  * File: subsystems.h
- * Date: 03/24/2026
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * This header file contains the function declarations for all subsystem
- * threads used in the BAZOOKI OS motorcycle simulation. Each subsystem
- * runs in its own pthread and is responsible for a specific part of the
- * simulation, such as engine behavior, motion, fuel usage, ECU updates,
- * and dashboard display.
+ * Declarations for pthread entry points. Implementations use mutex-protected
+ * critical sections on `g_state`, condition variables for engine-on gating
+ * (motion, fuel) and ECU wakeup, and documented lock order — see system_state.h.
  */
 
 #ifndef SUBSYSTEMS_H
 #define SUBSYSTEMS_H
 
-/*
- * Thread entry point declarations.
- * Each of these functions is designed to run in its own pthread
- * and continuously update or display part of the system.
- */
-
-/* Simulates engine RPM and engine temperature */
+/* Engine: RPM/temperature; engine_on from ignition/kill/refuel (Phase III) */
 void *engine_thread(void *arg);
 
-/* Simulates motorcycle speed and distance */
+/* Motion: speed/distance; Phase III W/S/C via pending steps */
 void *motion_thread(void *arg);
 
-/* Simulates fuel consumption over time */
+/* Fuel: consumption; refuel timer; empty-tank kill */
 void *fuel_thread(void *arg);
 
-/* Updates derived system values such as RPM zone and temperature class */
+/* ECU: classifications, driver signals (A/D/Z), rule enforcement */
 void *ecu_thread(void *arg);
 
-/* Displays the formatted dashboard output in the terminal */
+/* Dashboard: snapshot under all subsystem locks (Phase III timer display) */
 void *dashboard_thread(void *arg);
 
 #endif /* SUBSYSTEMS_H */

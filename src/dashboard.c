@@ -2,16 +2,16 @@
  * Names: Yaroslav Trach, Aiden Sheehy, Murat Yildiz
  * Course: CSC 220
  * Instructor: Dr. Kancharla
- * Project: Motorcycle Dashboard - Phase 1
+ * Project: Motorcycle Dashboard — Phase II
  * File: dashboard.c
- * Date: 03/24/2026
+ * Date: 03/24/2026 (Phase I); Phase II — 04/15/2026
  *
  * Description:
- * This file implements the dashboard subsystem of the motorcycle simulation.
- * Its job is to read the shared system state and display a formatted dashboard
- * in the terminal. This file does not control the simulation itself. It only
- * handles output such as engine status, RPM, temperature, speed, fuel level,
- * distance, timer values, signal indicators, and warning messages.
+ * Dashboard is read-only for simulation: each frame copies g_state under
+ * mtx_engine, mtx_motion, mtx_fuel, mtx_ecu in that fixed order (same as the
+ * rest of the program), then prints from a stack snapshot so printf never
+ * holds subsystem locks. State-change logging compares two snapshots so it
+ * never races producers.
  */
 
 #define _XOPEN_SOURCE 700
@@ -35,8 +35,8 @@
 /* Conversion value from miles to kilometers */
 #define MILES_TO_KM         1.60934
 
-/* Dashboard refresh delay in microseconds (50000 = 50 ms) */
-#define REFRESH_INTERVAL_US 50000
+/* Dashboard refresh (~10 FPS): overwrite redraw avoids full-screen erase flicker */
+#define REFRESH_INTERVAL_US 100000
 
 
 /* Converts the RPM zone enum into a readable text label */
@@ -76,6 +76,17 @@ static void format_time(time_t start, time_t now, char *buf) {
     int m = (int)((elapsed % 3600) / 60);
     int s = (int)(elapsed % 60);
 
+    snprintf(buf, 16, "%02d:%02d:%02d", h, m, s);
+}
+
+/* HH:MM:SS from a non-negative second count (frozen overall display when paused). */
+static void format_elapsed_seconds(long sec, char *buf) {
+    if (sec < 0) {
+        sec = 0;
+    }
+    int h = (int)(sec / 3600);
+    int m = (int)((sec % 3600) / 60);
+    int s = (int)(sec % 60);
     snprintf(buf, 16, "%02d:%02d:%02d", h, m, s);
 }
 
@@ -391,8 +402,17 @@ static void print_dashboard(const system_state_t *st) {
     time_t now = time(NULL);
     char time_overall[16], time_trip[16];
 
-    format_time(st->time_overall_start, now, time_overall);
-    format_time(st->time_trip_start, now, time_trip);
+    if (st->overall_timer_paused) {
+        format_elapsed_seconds(st->overall_elapsed_sec, time_overall);
+    } else {
+        format_time(st->time_overall_start, now, time_overall);
+    }
+
+    if (!st->trip_timer_running) {
+        snprintf(time_trip, sizeof time_trip, "00:00:00");
+    } else {
+        format_time(st->time_trip_start, now, time_trip);
+    }
 
     /* Show temperature in Celsius or Fahrenheit based on settings */
     float temp_display = st->use_celsius
@@ -518,9 +538,23 @@ static void print_dashboard(const system_state_t *st) {
         print_line("%s%s│ %s HEADLIGHT", left, right, st->headlight_on ? "●" : "○");
     }
 
-    /* Warning message when fuel is below the low threshold */
+    /* Three fixed rows so frame height never changes (required for home-only redraw). */
+    if (st->refueling_active) {
+        print_line("REFUELING — ignition blocked (~%d s)", REFUEL_DURATION_SEC);
+    } else {
+        print_line("");
+    }
+
     if (st->fuel_gallons < FUEL_LOW_THRESHOLD) {
         print_line("⚠ LOW FUEL");
+    } else {
+        print_line("");
+    }
+
+    if (st->needs_refuel_to_start && !st->refueling_active) {
+        print_line("⚠ EMPTY TANK — press F to refuel before I");
+    } else {
+        print_line("");
     }
 
     /* Latest log event (file tail shows full history; screen refresh clears stderr) */
@@ -532,34 +566,44 @@ static void print_dashboard(const system_state_t *st) {
 
 
 /*
- * Clears the terminal, prints the dashboard again,
- * and flushes output so the update appears immediately.
+ * Renders one frame from an already-captured snapshot (caller held locks during copy).
+ * full_screen_clear: use once (e.g. first frame) to erase scrollback junk; otherwise
+ * cursor-home only so the same box geometry overwrites prior output without ESC[J flicker.
  */
-void refresh_dashboard(void (*print_fn)(const system_state_t *), const system_state_t *st) {
-    printf("\033[H\033[J");
+void refresh_dashboard(void (*print_fn)(const system_state_t *), const system_state_t *st,
+                       int full_screen_clear) {
+    if (full_screen_clear) {
+        printf("\033[2J\033[H");
+    } else {
+        printf("\033[H");
+    }
     print_fn(st);
     fflush(stdout);
 }
 
 
 /*
- * Dashboard thread:
- * This thread runs continuously during the program.
- * Its only job is to refresh the terminal dashboard at a fixed interval
- * so the user can see updated motorcycle values in real time.
+ * Dashboard thread: each loop copies g_state under the four subsystem mutexes
+ * (see copy_system_state_snapshot), then logs and draws from `snap` only.
+ * REFRESH_INTERVAL_US (~10 FPS) spaces screen updates; redraw uses cursor-home overwrite.
  */
 void *dashboard_thread(void *arg) {
     (void)arg;
 
     LOG_INFO("DASH", "Dashboard thread started");
 
-    while (1) {
+    int first_dashboard_frame = 1;
+
+    while (!g_shutdown_request) {
         system_state_t snap;
         copy_system_state_snapshot(&snap);
         log_dashboard_state_changes(&snap);
-        refresh_dashboard(print_dashboard, &snap);
+        refresh_dashboard(print_dashboard, &snap, first_dashboard_frame);
+        first_dashboard_frame = 0;
         usleep(REFRESH_INTERVAL_US);
     }
+
+    printf("\033[?25h\033[0m\n");
 
     return NULL;
 }
